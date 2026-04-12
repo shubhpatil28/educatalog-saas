@@ -10,14 +10,12 @@ import {
     Calendar as CalendarIcon,
     Users,
     AlertTriangle,
-    ChevronLeft,
-    ChevronRight,
-    TrendingDown,
-    TrendingUp,
     History,
     Loader2,
     CheckCircle2,
-    XCircle
+    XCircle,
+    Clock,
+    Filter
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
@@ -34,40 +32,72 @@ import {
     serverTimestamp,
     orderBy,
     limit,
-    Timestamp
+    Timestamp,
+    writeBatch
 } from 'firebase/firestore';
+
+type AttendanceStatus = 'present' | 'absent' | 'late';
 
 export default function AttendancePage() {
     const { profile } = useAuth();
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+
+    // Class selection (for principals)
+    const [selectedClass, setSelectedClass] = useState('10');
+    const [selectedDivision, setSelectedDivision] = useState('A');
+
     const [students, setStudents] = useState<any[]>([]);
-    const [attendance, setAttendance] = useState<Record<string, 'present' | 'absent'>>({});
+    const [attendance, setAttendance] = useState<Record<string, AttendanceStatus>>({});
     const [history, setHistory] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [saveLoading, setSaveLoading] = useState(false);
 
-    // Fetch students
+    // Sync selected class with teacher profile
+    useEffect(() => {
+        if (profile?.role === 'teacher' && profile.class && profile.division) {
+            setSelectedClass(profile.class);
+            setSelectedDivision(profile.division);
+        }
+    }, [profile]);
+
+    // Fetch students based on role and selected class/div
     useEffect(() => {
         if (!profile?.schoolId) return;
+        setLoading(true);
 
-        const q = query(
-            collection(db, 'students'),
-            where('schoolId', '==', profile.schoolId)
-        );
+        let q;
+        if (profile.role === 'teacher') {
+            // Teachers only see their assigned class
+            q = query(
+                collection(db, 'students'),
+                where('schoolId', '==', profile.schoolId),
+                where('class', '==', profile.class || '10'),
+                where('division', '==', profile.division || 'A')
+            );
+        } else {
+            // Principals can view selected class
+            q = query(
+                collection(db, 'students'),
+                where('schoolId', '==', profile.schoolId),
+                where('class', '==', selectedClass),
+                where('division', '==', selectedDivision)
+            );
+        }
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const studentData = snapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
-            }));
+            })).sort((a: any, b: any) => (parseInt(a.rollNumber) || 0) - (parseInt(b.rollNumber) || 0));
+
             setStudents(studentData);
             setLoading(false);
         });
 
         return () => unsubscribe();
-    }, [profile?.schoolId]);
+    }, [profile, selectedClass, selectedDivision]);
 
-    // Fetch attendance for selected date
+    // Fetch attendance for selected date and class
     useEffect(() => {
         if (!profile?.schoolId || !selectedDate) return;
 
@@ -77,15 +107,20 @@ export default function AttendancePage() {
             const endOfDay = new Date(selectedDate);
             endOfDay.setHours(23, 59, 59, 999);
 
+            const targetClass = profile.role === 'teacher' ? profile.class : selectedClass;
+            const targetDiv = profile.role === 'teacher' ? profile.division : selectedDivision;
+
             const q = query(
                 collection(db, 'attendance'),
                 where('schoolId', '==', profile.schoolId),
+                where('class', '==', targetClass),
+                where('division', '==', targetDiv),
                 where('date', '>=', Timestamp.fromDate(startOfDay)),
                 where('date', '<=', Timestamp.fromDate(endOfDay))
             );
 
             const snapshot = await getDocs(q);
-            const records: Record<string, 'present' | 'absent'> = {};
+            const records: Record<string, AttendanceStatus> = {};
             snapshot.docs.forEach(doc => {
                 const data = doc.data();
                 records[data.studentId] = data.status;
@@ -94,17 +129,22 @@ export default function AttendancePage() {
         };
 
         fetchAttendance();
-    }, [profile?.schoolId, selectedDate]);
+    }, [profile, selectedDate, selectedClass, selectedDivision]);
 
-    // Fetch history
+    // Fetch history (last 10 records for this class)
     useEffect(() => {
         if (!profile?.schoolId) return;
+
+        const targetClass = profile.role === 'teacher' ? profile.class : selectedClass;
+        const targetDiv = profile.role === 'teacher' ? profile.division : selectedDivision;
 
         const q = query(
             collection(db, 'attendance'),
             where('schoolId', '==', profile.schoolId),
+            where('class', '==', targetClass),
+            where('division', '==', targetDiv),
             orderBy('date', 'desc'),
-            limit(10)
+            limit(12)
         );
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -117,12 +157,12 @@ export default function AttendancePage() {
         });
 
         return () => unsubscribe();
-    }, [profile?.schoolId]);
+    }, [profile, selectedClass, selectedDivision]);
 
-    const handleToggle = (studentId: string, status: 'present' | 'absent') => {
+    const handleStatusChange = (studentId: string, status: AttendanceStatus) => {
         setAttendance(prev => ({
             ...prev,
-            [studentId]: prev[studentId] === status ? 'absent' : status // Default to absent if unselected
+            [studentId]: status
         }));
     };
 
@@ -132,28 +172,36 @@ export default function AttendancePage() {
 
         try {
             const dateObj = new Date(selectedDate);
-            dateObj.setHours(12, 0, 0, 0); // Set to noon to avoid timezone shift issues for the "day"
+            dateObj.setHours(12, 0, 0, 0);
 
-            const promises = students.map(student => {
+            const batch = writeBatch(db);
+            const targetClass = profile.role === 'teacher' ? profile.class : selectedClass;
+            const targetDiv = profile.role === 'teacher' ? profile.division : selectedDivision;
+
+            students.forEach(student => {
                 const status = attendance[student.id] || 'absent';
                 const docId = `${student.id}_${selectedDate}`;
+                const docRef = doc(db, 'attendance', docId);
 
-                return setDoc(doc(db, 'attendance', docId), {
+                batch.set(docRef, {
                     studentId: student.id,
                     studentName: student.name,
-                    class: student.class,
+                    rollNumber: student.roll || '',
+                    class: targetClass,
+                    division: targetDiv,
                     date: Timestamp.fromDate(dateObj),
                     status: status,
                     schoolId: profile.schoolId,
+                    recordedBy: profile.uid,
                     lastUpdated: serverTimestamp()
                 }, { merge: true });
             });
 
-            await Promise.all(promises);
-            alert("Attendance synchronized successfully!");
+            await batch.commit();
+            alert(`Attendance for Class ${targetClass}-${targetDiv} synced!`);
         } catch (error) {
             console.error("Error saving attendance:", error);
-            alert("Failed to synchronize attendance logs.");
+            alert("Failed to sync attendance. Check console for details.");
         } finally {
             setSaveLoading(false);
         }
@@ -161,25 +209,65 @@ export default function AttendancePage() {
 
     const stats = {
         present: Object.values(attendance).filter(v => v === 'present').length,
-        absent: students.length - Object.values(attendance).filter(v => v === 'present').length,
+        absent: Object.values(attendance).filter(v => v === 'absent').length,
+        late: Object.values(attendance).filter(v => v === 'late').length,
+        unmarked: students.length - Object.keys(attendance).length,
         total: students.length,
     };
 
     const chartData = [
         { name: 'Present', value: stats.present, color: '#10b981' },
         { name: 'Absent', value: stats.absent, color: '#ef4444' },
+        { name: 'Late', value: stats.late, color: '#f59e0b' },
     ];
 
     return (
-        <DashboardLayout allowedRoles={['teacher']}>
-            <div className="space-y-6">
-                {/* Header & Date Selector */}
+        <DashboardLayout allowedRoles={['teacher', 'principal']}>
+            <div className="space-y-6 pb-20">
+                {/* Top Navigation & Status */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-                    <div>
-                        <h1 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">Daily Attendance</h1>
-                        <p className="text-slate-500 dark:text-slate-400 font-medium mt-1 uppercase text-xs tracking-[0.2em]">Institutional Registry • Session 2026-27</p>
+                    <div className="flex items-center gap-4">
+                        <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-blue-500/20">
+                            <CheckCircle2 className="w-8 h-8" />
+                        </div>
+                        <div>
+                            <h1 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">Institutional Attendance</h1>
+                            <div className="flex items-center gap-2 mt-1">
+                                <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-600 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest">
+                                    Class {profile?.role === 'teacher' ? `${profile.class}-${profile.division}` : `${selectedClass}-${selectedDivision}`}
+                                </span>
+                                <span className="text-slate-400 font-bold text-[10px] uppercase tracking-widest leading-none">• Registry v2.0</span>
+                            </div>
+                        </div>
                     </div>
+
                     <div className="flex items-center gap-3">
+                        {profile?.role === 'principal' && (
+                            <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 rounded-xl border border-slate-100 dark:border-slate-800 shadow-sm">
+                                <Filter className="w-4 h-4 text-slate-400 ml-2" />
+                                <select
+                                    value={selectedClass}
+                                    onChange={(e) => setSelectedClass(e.target.value)}
+                                    className="bg-transparent border-none text-xs font-black uppercase outline-none cursor-pointer"
+                                    title="Select Class"
+                                >
+                                    {[...Array(12)].map((_, i) => (
+                                        <option key={i + 1} value={String(i + 1)}>Class {i + 1}</option>
+                                    ))}
+                                </select>
+                                <select
+                                    value={selectedDivision}
+                                    onChange={(e) => setSelectedDivision(e.target.value)}
+                                    className="bg-transparent border-none text-xs font-black uppercase outline-none cursor-pointer border-l border-slate-100 dark:border-slate-800 ml-2 pl-2"
+                                    title="Select Division"
+                                >
+                                    {['A', 'B', 'C', 'D', 'E'].map(div => (
+                                        <option key={div} value={div}>Div {div}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+
                         <Card className="flex items-center gap-2 p-2 border-slate-200 shadow-sm">
                             <div className="flex items-center gap-2 px-2 font-black text-slate-700 dark:text-slate-200">
                                 <CalendarIcon className="w-4 h-4 text-blue-600" />
@@ -187,33 +275,33 @@ export default function AttendancePage() {
                                     type="date"
                                     value={selectedDate}
                                     onChange={(e) => setSelectedDate(e.target.value)}
-                                    title="Select Attendance Date"
-                                    aria-label="Select Attendance Date"
+                                    title="Select Date"
                                     className="bg-transparent border-none outline-none font-black text-sm uppercase cursor-pointer"
                                 />
                             </div>
                         </Card>
+
                         <Button
                             onClick={handleSaveAttendance}
-                            disabled={saveLoading}
-                            className="gap-2 h-12 px-6 rounded-xl shadow-lg shadow-blue-500/20"
+                            disabled={saveLoading || students.length === 0}
+                            className="gap-2 h-12 px-6 rounded-xl shadow-lg shadow-blue-500/20 font-black uppercase text-[10px] tracking-widest"
                         >
                             {saveLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                            Sync Attendance
+                            Sync Ledger
                         </Button>
                     </div>
                 </div>
 
-                {/* Analytics Top Row */}
+                {/* Performance Analytics */}
                 <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                    <Card className="lg:col-span-1 flex flex-col items-center justify-center p-6 text-center">
-                        <div className="relative w-40 h-40">
+                    <Card className="hidden lg:flex flex-col items-center justify-center p-6 text-center border-slate-100 dark:border-slate-800">
+                        <div className="relative w-32 h-32">
                             <ResponsiveContainer width="100%" height="100%">
                                 <PieChart>
                                     <Pie
                                         data={chartData}
-                                        innerRadius={50}
-                                        outerRadius={70}
+                                        innerRadius={45}
+                                        outerRadius={60}
                                         dataKey="value"
                                         stroke="none"
                                         paddingAngle={5}
@@ -222,108 +310,134 @@ export default function AttendancePage() {
                                             <Cell key={`cell-${index}`} fill={entry.color} />
                                         ))}
                                     </Pie>
-                                    <Tooltip />
                                 </PieChart>
                             </ResponsiveContainer>
                             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                                <p className="text-2xl font-black text-slate-900 dark:text-white">
+                                <p className="text-xl font-black text-slate-900 dark:text-white">
                                     {stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%
                                 </p>
-                                <p className="text-[10px] font-black text-slate-400 uppercase">Engagement</p>
+                                <p className="text-[8px] font-black text-slate-400 uppercase tracking-tighter leading-none mt-1">Presence</p>
                             </div>
                         </div>
                     </Card>
 
-                    <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <Card className="p-6 bg-gradient-to-br from-blue-600 to-indigo-700 border-none shadow-xl shadow-blue-500/10 relative overflow-hidden group">
-                            <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 group-hover:scale-110 transition-transform" />
-                            <div className="relative z-10 space-y-4">
-                                <CheckCircle2 className="w-8 h-8 text-white/40" />
-                                <div>
-                                    <p className="text-white text-3xl font-black">{stats.present}</p>
-                                    <p className="text-white/60 font-medium uppercase tracking-widest text-[10px]">Students Present Today</p>
-                                </div>
-                            </div>
+                    <div className="lg:col-span-3 grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <Card className="p-5 border-none bg-emerald-600 text-white shadow-xl shadow-emerald-500/20 transition-transform hover:scale-[1.02]">
+                            <CheckCircle2 className="w-6 h-6 opacity-40 mb-3" />
+                            <p className="text-2xl font-black">{stats.present}</p>
+                            <p className="text-[9px] font-black uppercase tracking-widest opacity-60">Present</p>
                         </Card>
-
-                        <Card className="p-6 bg-red-50 dark:bg-red-900/10 border-red-100 dark:border-red-900/20">
-                            <XCircle className="w-8 h-8 text-red-600 mb-6" />
-                            <div>
-                                <h4 className="text-2xl font-black text-slate-900 dark:text-white">{stats.absent}</h4>
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Students Absent Today</p>
-                            </div>
+                        <Card className="p-5 border-none bg-red-600 text-white shadow-xl shadow-red-500/20 transition-transform hover:scale-[1.02]">
+                            <XCircle className="w-6 h-6 opacity-40 mb-3" />
+                            <p className="text-2xl font-black">{stats.absent}</p>
+                            <p className="text-[9px] font-black uppercase tracking-widest opacity-60">Absent</p>
                         </Card>
-
-                        <Card className="p-6 bg-slate-50 dark:bg-slate-900/50 border-slate-100 dark:border-slate-800">
-                            <Users className="w-8 h-8 text-blue-600 mb-6" />
-                            <div>
-                                <h4 className="text-2xl font-black text-slate-900 dark:text-white">{stats.total}</h4>
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Students Enrolled</p>
-                            </div>
+                        <Card className="p-5 border-none bg-amber-500 text-white shadow-xl shadow-amber-500/20 transition-transform hover:scale-[1.02]">
+                            <Clock className="w-6 h-6 opacity-40 mb-3" />
+                            <p className="text-2xl font-black">{stats.late}</p>
+                            <p className="text-[9px] font-black uppercase tracking-widest opacity-60">Late Arrival</p>
+                        </Card>
+                        <Card className="p-5 border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 transition-transform hover:scale-[1.02]">
+                            <Users className="w-6 h-6 text-blue-600 mb-3" />
+                            <p className="text-2xl font-black text-slate-900 dark:text-white">{stats.total}</p>
+                            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Total Batch</p>
                         </Card>
                     </div>
                 </div>
 
-                {/* Student List */}
-                <Card className="p-0 overflow-hidden border-slate-100 dark:border-slate-800/50">
+                {/* Enrollment Table */}
+                <Card className="p-0 overflow-hidden border-slate-100 dark:border-slate-800/50 shadow-2xl">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left border-collapse">
-                            <thead className="bg-slate-50 dark:bg-slate-800/50">
+                            <thead className="bg-slate-50 dark:bg-slate-800/60 font-black text-slate-400 uppercase text-[9px] tracking-[0.2em]">
                                 <tr>
-                                    <th className="py-5 px-6 text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">Roll No.</th>
-                                    <th className="py-5 px-6 text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">Student Name</th>
-                                    <th className="py-5 px-6 text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">Class</th>
-                                    <th className="py-5 px-6 text-right text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">Attendance Status</th>
+                                    <th className="py-6 px-8">Identity</th>
+                                    <th className="py-6 px-8 text-center">Current Status</th>
+                                    <th className="py-6 px-8 text-right">Action Protocol</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                                 {loading ? (
                                     <tr>
-                                        <td colSpan={4} className="py-20 text-center">
-                                            <Loader2 className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-4" />
-                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Compiling Records...</p>
+                                        <td colSpan={3} className="py-24 text-center">
+                                            <Loader2 className="w-10 h-10 text-blue-600 animate-spin mx-auto mb-4" />
+                                            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 antialiased">Synchronizing Class Records...</p>
                                         </td>
                                     </tr>
                                 ) : students.length > 0 ? (
                                     students.map((student, i) => (
                                         <motion.tr
                                             key={student.id}
-                                            initial={{ opacity: 0, x: -10 }}
-                                            animate={{ opacity: 1, x: 0 }}
-                                            transition={{ delay: i * 0.05 }}
-                                            className="group hover:bg-slate-50/50 dark:hover:bg-slate-800/20"
+                                            initial={{ opacity: 0, y: 10 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            transition={{ delay: i * 0.03 }}
+                                            className="group hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-all"
                                         >
-                                            <td className="py-5 px-6 font-bold text-slate-400">#{student.roll}</td>
-                                            <td className="py-5 px-6">
-                                                <div className="flex items-center gap-4">
-                                                    <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 font-bold border border-slate-200 dark:border-slate-700 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                                                        {student.name.charAt(0)}
+                                            <td className="py-6 px-8">
+                                                <div className="flex items-center gap-5">
+                                                    <div className="w-11 h-11 rounded-2xl bg-white dark:bg-slate-900 border-2 border-slate-100 dark:border-slate-700 flex items-center justify-center font-black group-hover:bg-blue-600 group-hover:text-white group-hover:border-blue-600 transition-all text-slate-400 shadow-sm">
+                                                        {student.roll || i + 1}
                                                     </div>
-                                                    <p className="font-black text-slate-900 dark:text-slate-100">{student.name}</p>
+                                                    <div>
+                                                        <p className="font-black text-slate-900 dark:text-slate-100 antialiased leading-none">{student.name}</p>
+                                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1.5 opacity-60">Secondary Contact Verified</p>
+                                                    </div>
                                                 </div>
                                             </td>
-                                            <td className="py-5 px-6 text-sm font-bold text-slate-600">{student.class}</td>
-                                            <td className="py-5 px-6">
+                                            <td className="py-6 px-8 text-center">
+                                                <AnimatePresence mode="wait">
+                                                    {!attendance[student.id] ? (
+                                                        <motion.span
+                                                            key="unmarked"
+                                                            initial={{ opacity: 0, scale: 0.8 }}
+                                                            animate={{ opacity: 1, scale: 1 }}
+                                                            className="px-4 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 text-[9px] font-black uppercase tracking-widest"
+                                                        >
+                                                            Unmarked
+                                                        </motion.span>
+                                                    ) : (
+                                                        <motion.span
+                                                            key={attendance[student.id]}
+                                                            initial={{ opacity: 0, scale: 0.8 }}
+                                                            animate={{ opacity: 1, scale: 1 }}
+                                                            className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border-2 ${attendance[student.id] === 'present' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
+                                                                    attendance[student.id] === 'absent' ? 'bg-red-50 text-red-600 border-red-100' :
+                                                                        'bg-amber-50 text-amber-600 border-amber-100'
+                                                                }`}
+                                                        >
+                                                            {attendance[student.id]}
+                                                        </motion.span>
+                                                    )}
+                                                </AnimatePresence>
+                                            </td>
+                                            <td className="py-6 px-8">
                                                 <div className="flex items-center justify-end gap-2">
                                                     <button
-                                                        onClick={() => handleToggle(student.id, 'present')}
-                                                        className={`h-11 px-6 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-2 border-2 ${attendance[student.id] === 'present'
-                                                            ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-600/20'
-                                                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:border-emerald-500 hover:text-emerald-500'
+                                                        onClick={() => handleStatusChange(student.id, 'present')}
+                                                        className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all ${attendance[student.id] === 'present'
+                                                                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/40 scale-110'
+                                                                : 'bg-slate-50 dark:bg-slate-900 text-slate-300 hover:text-emerald-500 border border-slate-100 dark:border-slate-800'
                                                             }`}
                                                     >
-                                                        {attendance[student.id] === 'present' && <Check className="w-3 h-3" />}
-                                                        Present
+                                                        <Check className="w-5 h-5" />
                                                     </button>
                                                     <button
-                                                        onClick={() => handleToggle(student.id, 'absent')}
-                                                        className={`h-11 px-6 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-2 border-2 ${attendance[student.id] === 'absent'
-                                                            ? 'bg-red-600 border-red-600 text-white shadow-lg shadow-red-600/20'
-                                                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:border-red-500 hover:text-red-500'
+                                                        onClick={() => handleStatusChange(student.id, 'late')}
+                                                        className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all ${attendance[student.id] === 'late'
+                                                                ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/40 scale-110'
+                                                                : 'bg-slate-50 dark:bg-slate-900 text-slate-300 hover:text-amber-500 border border-slate-100 dark:border-slate-800'
                                                             }`}
                                                     >
-                                                        {attendance[student.id] === 'absent' && <X className="w-3 h-3" />}
-                                                        Absent
+                                                        <Clock className="w-5 h-5" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleStatusChange(student.id, 'absent')}
+                                                        className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all ${attendance[student.id] === 'absent'
+                                                                ? 'bg-red-600 text-white shadow-lg shadow-red-500/40 scale-110'
+                                                                : 'bg-slate-50 dark:bg-slate-900 text-slate-300 hover:text-red-500 border border-slate-100 dark:border-slate-800'
+                                                            }`}
+                                                    >
+                                                        <X className="w-5 h-5" />
                                                     </button>
                                                 </div>
                                             </td>
@@ -331,8 +445,13 @@ export default function AttendancePage() {
                                     ))
                                 ) : (
                                     <tr>
-                                        <td colSpan={4} className="py-20 text-center">
-                                            <p className="text-slate-500 font-bold">No students found for this institution.</p>
+                                        <td colSpan={3} className="py-32 text-center">
+                                            <div className="max-w-xs mx-auto space-y-4">
+                                                <div className="w-20 h-20 bg-slate-50 dark:bg-slate-800/50 rounded-[2rem] flex items-center justify-center text-slate-200 mx-auto">
+                                                    <Users className="w-10 h-10" />
+                                                </div>
+                                                <p className="text-slate-500 font-black uppercase text-[10px] tracking-widest antialiased">No students found for Class {profile?.role === 'teacher' ? `${profile.class}-${profile.division}` : `${selectedClass}-${selectedDivision}`}</p>
+                                            </div>
                                         </td>
                                     </tr>
                                 )}
@@ -341,35 +460,34 @@ export default function AttendancePage() {
                     </div>
                 </Card>
 
-                {/* History Section */}
+                {/* Class Ledger History */}
                 <div className="space-y-4">
                     <div className="flex items-center gap-3">
                         <History className="w-5 h-5 text-blue-600" />
-                        <h2 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-wider">Recent Logs</h2>
+                        <h2 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-wider">Class Ledger History</h2>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                         {history.map((record, i) => (
                             <motion.div
                                 key={record.id}
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
+                                initial={{ opacity: 0, scale: 0.9 }}
+                                animate={{ opacity: 1, scale: 1 }}
                                 transition={{ delay: i * 0.05 }}
                             >
-                                <Card className="p-4 flex items-center justify-between border-slate-100 dark:border-slate-800/50">
-                                    <div className="flex items-center gap-3">
-                                        <div className={`p-2 rounded-lg ${record.status === 'present' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
-                                            {record.status === 'present' ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
+                                <Card className="p-4 border-slate-100 dark:border-slate-800/50 hover:border-blue-200 transition-colors">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${record.status === 'present' ? 'bg-emerald-50 text-emerald-600' :
+                                                record.status === 'absent' ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-600'
+                                            }`}>
+                                            {record.status === 'present' ? <Check className="w-4 h-4" /> :
+                                                record.status === 'absent' ? <X className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
                                         </div>
-                                        <div>
-                                            <p className="font-black text-slate-900 dark:text-white text-sm leading-none">{record.studentName}</p>
-                                            <p className="text-[10px] font-black text-slate-400 mt-1 uppercase">
-                                                {record.date?.toLocaleDateString()} • Class {record.class}
-                                            </p>
-                                        </div>
+                                        <span className="text-[8px] font-black uppercase tracking-widest text-slate-400">
+                                            {record.date?.toLocaleDateString()}
+                                        </span>
                                     </div>
-                                    <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${record.status === 'present' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                                        {record.status}
-                                    </span>
+                                    <p className="font-black text-slate-900 dark:text-white text-sm leading-tight line-clamp-1">{record.studentName}</p>
+                                    <p className="text-[9px] font-black uppercase text-slate-400 mt-1 opacity-70">Roll #{record.rollNumber || '?'}</p>
                                 </Card>
                             </motion.div>
                         ))}
@@ -377,12 +495,12 @@ export default function AttendancePage() {
                 </div>
             </div>
 
-            {/* Sticky Save Button for Mobile */}
-            <div className="fixed bottom-6 right-6 md:hidden">
+            {/* Float Action for Tablet/Mobile */}
+            <div className="fixed bottom-8 right-8 lg:hidden z-30">
                 <Button
                     onClick={handleSaveAttendance}
-                    disabled={saveLoading}
-                    className="w-14 h-14 rounded-full shadow-2xl bg-blue-600 flex items-center justify-center p-0"
+                    disabled={saveLoading || students.length === 0}
+                    className="w-16 h-16 rounded-3xl shadow-2xl bg-blue-600 flex items-center justify-center p-0 transition-transform active:scale-95 border-4 border-white dark:border-slate-950"
                 >
                     {saveLoading ? <Loader2 className="w-6 h-6 animate-spin text-white" /> : <Save className="w-6 h-6 text-white" />}
                 </Button>

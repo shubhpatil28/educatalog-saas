@@ -30,6 +30,7 @@ import {
 } from 'recharts';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/context/AuthContext';
+import Link from 'next/link';
 import { cn } from '@/components/ui';
 import { db } from '@/lib/firebase';
 import {
@@ -147,6 +148,13 @@ export default function PrincipalDashboard() {
                             Monitoring {school?.name || 'Institutional Domain'} • Academic Year 2026-27
                         </p>
                     </div>
+
+                    <Link href="/dashboard/principal/teachers">
+                        <Button className="h-12 px-6 rounded-2xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition-all gap-2 group">
+                            <UserSquare2 className="w-5 h-5 text-purple-600 group-hover:scale-110 transition-transform" />
+                            <span className="text-xs font-black uppercase tracking-widest">Faculty Management</span>
+                        </Button>
+                    </Link>
                 </div>
 
                 {/* Improved Stats Grid */}

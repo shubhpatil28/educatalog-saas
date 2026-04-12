@@ -64,7 +64,8 @@ export default function TeacherManagementPage() {
         name: '',
         email: '',
         password: '',
-        assignedClass: 'Class 1-A'
+        class: '10',
+        division: 'A'
     });
     const [isEditing, setIsEditing] = useState(false);
 
@@ -116,7 +117,8 @@ export default function TeacherManagementPage() {
                 name: formData.name,
                 email: formData.email,
                 role: 'teacher',
-                assignedClass: formData.assignedClass,
+                class: formData.class,
+                division: formData.division,
                 schoolId: profile.schoolId,
                 status: 'Active',
                 createdAt: serverTimestamp()
@@ -144,7 +146,8 @@ export default function TeacherManagementPage() {
         try {
             await updateDoc(doc(db, 'users', formData.id), {
                 name: formData.name,
-                assignedClass: formData.assignedClass
+                class: formData.class,
+                division: formData.division
             });
             setIsModalOpen(false);
             resetForm();
@@ -180,7 +183,7 @@ export default function TeacherManagementPage() {
     };
 
     const resetForm = () => {
-        setFormData({ id: '', name: '', email: '', password: '', assignedClass: 'Class 1-A' });
+        setFormData({ id: '', name: '', email: '', password: '', class: '10', division: 'A' });
         setIsEditing(false);
     };
 
@@ -190,7 +193,8 @@ export default function TeacherManagementPage() {
             name: teacher.name,
             email: teacher.email,
             password: '', // Don't show password
-            assignedClass: teacher.assignedClass
+            class: teacher.class || '10',
+            division: teacher.division || 'A'
         });
         setIsEditing(true);
         setIsModalOpen(true);
@@ -307,7 +311,7 @@ export default function TeacherManagementPage() {
                                                 <div className="p-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-slate-400">
                                                     <BookOpen className="w-4 h-4" />
                                                 </div>
-                                                <span className="font-black text-slate-700 dark:text-slate-300 text-sm tracking-tight">{teacher.assignedClass}</span>
+                                                <span className="font-black text-slate-700 dark:text-slate-300 text-sm tracking-tight">{teacher.class}-{teacher.division}</span>
                                             </div>
                                         </td>
                                         <td className="py-6 px-8">
@@ -406,21 +410,33 @@ export default function TeacherManagementPage() {
                                             value={formData.email}
                                             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                                         />
-                                        <div className="space-y-1.5">
-                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">Class Assignment</label>
-                                            <select
-                                                className="w-full h-14 px-6 bg-slate-50/50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-800 rounded-2xl outline-none focus:border-blue-500 transition-colors font-black text-sm uppercase tracking-tighter"
-                                                value={formData.assignedClass}
-                                                onChange={(e) => setFormData({ ...formData, assignedClass: e.target.value })}
-                                                title="Select Class"
-                                            >
-                                                <option>Class 1-A</option>
-                                                <option>Class 2-B</option>
-                                                <option>Class 3-A</option>
-                                                <option>Class 4-C</option>
-                                                <option>Class 5-B</option>
-                                                <option>General Faculty</option>
-                                            </select>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">Class</label>
+                                                <select
+                                                    className="w-full h-14 px-6 bg-slate-50/50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-800 rounded-2xl outline-none focus:border-blue-500 transition-colors font-black text-sm uppercase tracking-tighter"
+                                                    value={formData.class}
+                                                    onChange={(e) => setFormData({ ...formData, class: e.target.value })}
+                                                    title="Select Class"
+                                                >
+                                                    {[...Array(12)].map((_, i) => (
+                                                        <option key={i + 1} value={String(i + 1)}>{i + 1}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">Division</label>
+                                                <select
+                                                    className="w-full h-14 px-6 bg-slate-50/50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-800 rounded-2xl outline-none focus:border-blue-500 transition-colors font-black text-sm uppercase tracking-tighter"
+                                                    value={formData.division}
+                                                    onChange={(e) => setFormData({ ...formData, division: e.target.value })}
+                                                    title="Select Division"
+                                                >
+                                                    {['A', 'B', 'C', 'D', 'E'].map(div => (
+                                                        <option key={div} value={div}>{div}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
                                         </div>
                                         {!isEditing && (
                                             <Input

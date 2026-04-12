@@ -109,7 +109,7 @@ export default function TeacherDashboard() {
                     <div>
                         <h1 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">System Portal</h1>
                         <p className="text-slate-500 dark:text-slate-400 font-medium uppercase text-xs tracking-widest mt-1">
-                            Greeting Assistant, <span className="text-blue-600 font-bold">{profile?.name}</span> • {profile?.assignedClass || 'General Faculty'}
+                            Greeting Assistant, <span className="text-blue-600 font-bold">{profile?.name}</span> • {profile?.class ? `Class ${profile.class}-${profile.division || 'A'}` : 'General Faculty'}
                         </p>
                     </div>
                     <div className="hidden md:block text-right">

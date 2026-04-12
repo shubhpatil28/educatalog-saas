@@ -50,7 +50,8 @@ export default function StudentCatalogPage() {
     const [formData, setFormData] = useState({
         name: '',
         roll: '',
-        class: '',
+        class: '10',
+        division: 'A',
         motherName: '',
         dob: ''
     });
@@ -83,7 +84,8 @@ export default function StudentCatalogPage() {
             setFormData({
                 name: student.name,
                 roll: student.roll.toString(),
-                class: student.class,
+                class: student.class || '10',
+                division: student.division || 'A',
                 motherName: student.motherName,
                 dob: student.dob
             });
@@ -92,7 +94,8 @@ export default function StudentCatalogPage() {
             setFormData({
                 name: '',
                 roll: '',
-                class: '',
+                class: '10',
+                division: 'A',
                 motherName: '',
                 dob: ''
             });
@@ -110,6 +113,7 @@ export default function StudentCatalogPage() {
                 name: formData.name,
                 roll: parseInt(formData.roll),
                 class: formData.class,
+                division: formData.division,
                 motherName: formData.motherName,
                 dob: formData.dob,
                 schoolId: profile.schoolId
@@ -193,7 +197,7 @@ export default function StudentCatalogPage() {
                                 <tr>
                                     <th className="py-5 px-6 text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">Student Name</th>
                                     <th className="py-5 px-6 text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">Roll No.</th>
-                                    <th className="py-5 px-6 text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">Class</th>
+                                    <th className="py-5 px-6 text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">Assignment</th>
                                     <th className="py-5 px-6 text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">Mother's Name</th>
                                     <th className="py-5 px-6 text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">D.O.B</th>
                                     <th className="py-5 px-6 text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] text-right text-right">Actions</th>
@@ -225,7 +229,7 @@ export default function StudentCatalogPage() {
                                                     </div>
                                                     <div>
                                                         <p className="font-black text-slate-900 dark:text-slate-100">{student.name}</p>
-                                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mt-1">Class {student.class}</p>
+                                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mt-1">Grade {student.class}-{student.division}</p>
                                                     </div>
                                                 </div>
                                             </td>
@@ -236,7 +240,7 @@ export default function StudentCatalogPage() {
                                             </td>
                                             <td className="py-5 px-6">
                                                 <span className="text-sm font-bold text-slate-700 dark:text-slate-300">
-                                                    {student.class}
+                                                    {student.class}-{student.division}
                                                 </span>
                                             </td>
                                             <td className="py-5 px-6">
@@ -336,14 +340,34 @@ export default function StudentCatalogPage() {
                                                 onChange={(e) => setFormData({ ...formData, roll: e.target.value })}
                                                 className="h-14 rounded-2xl"
                                             />
-                                            <Input
-                                                label="Class / Grade"
-                                                placeholder="e.g. 10A"
-                                                required
-                                                value={formData.class}
-                                                onChange={(e) => setFormData({ ...formData, class: e.target.value })}
-                                                className="h-14 rounded-2xl"
-                                            />
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <div className="space-y-1.5">
+                                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">Class</label>
+                                                    <select
+                                                        className="w-full h-14 px-3 bg-slate-50/50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-800 rounded-2xl outline-none focus:border-blue-500 transition-colors font-black text-sm"
+                                                        value={formData.class}
+                                                        onChange={(e) => setFormData({ ...formData, class: e.target.value })}
+                                                        title="Select Class"
+                                                    >
+                                                        {[...Array(12)].map((_, i) => (
+                                                            <option key={i + 1} value={String(i + 1)}>{i + 1}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div className="space-y-1.5">
+                                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">Div</label>
+                                                    <select
+                                                        className="w-full h-14 px-3 bg-slate-50/50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-800 rounded-2xl outline-none focus:border-blue-500 transition-colors font-black text-sm"
+                                                        value={formData.division}
+                                                        onChange={(e) => setFormData({ ...formData, division: e.target.value })}
+                                                        title="Select Division"
+                                                    >
+                                                        {['A', 'B', 'C', 'D', 'E'].map(div => (
+                                                            <option key={div} value={div}>{div}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            </div>
                                         </div>
                                         <Input
                                             label="Mother's Name"

@@ -1,0 +1,117 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── OPTIMIZED HELPER FUNCTIONS ──────────────────────────────────────
+    
+    // Check if the user is authenticated
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Single source of truth for user data to optimize rule evaluation cost
+    // Firestore rules cache get() calls within a single request, but using a centralized function 
+    // reduces complexity and ensures consistency across all match blocks.
+    function currentUser() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Role-based shortcut check using the optimized user document fetch
+    function hasRole(role) {
+      return currentUser().role == role;
+    }
+
+    // Multi-tenant check: ensuring user belongs to the requested institution
+    function isSameSchool(schoolId) {
+      return currentUser().schoolId == schoolId;
+    }
+
+    // ─── SCHOOLS COLLECTION ─────────────────────────────────────────────
+    match /schools/{schoolId} {
+      // Users can only read their own school data
+      allow read: if isSignedIn() && (isSameSchool(schoolId) || hasRole('superadmin'));
+      
+      // Only principal of that school or superadmin can modify institutional settings
+      allow update: if isSignedIn() && (
+        (hasRole('principal') && isSameSchool(schoolId)) || 
+        hasRole('superadmin')
+      );
+      
+      // Allow creation during onboarding
+      allow create: if isSignedIn();
+    }
+
+    // ─── USERS COLLECTION ───────────────────────────────────────────────
+    match /users/{userId} {
+      allow read: if isSignedIn() && (isSameSchool(resource.data.schoolId) || hasRole('superadmin'));
+      
+      // Profile creation only for own UID
+      allow create: if isSignedIn() && request.auth.uid == userId;
+
+      allow update: if isSignedIn() && (
+        // Self-edit: Cannot change role, schoolId, or status
+        (request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'schoolId', 'status'])) ||
+        // Principal managing school staff (cannot modify roles to avoid elevation)
+        (hasRole('principal') && isSameSchool(resource.data.schoolId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'schoolId'])) ||
+        // Superadmin override
+        hasRole('superadmin')
+      );
+    }
+
+    // ─── STUDENTS COLLECTION ────────────────────────────────────────────
+    match /students/{studentId} {
+      function canViewStudents() {
+        let user = currentUser();
+        return (
+          (hasRole('principal') && user.schoolId == resource.data.schoolId) ||
+          (hasRole('teacher') && user.schoolId == resource.data.schoolId && 
+           resource.data.class == user.class && 
+           resource.data.division == user.division) ||
+          hasRole('superadmin')
+        );
+      }
+
+      function canManageStudents() {
+        let user = currentUser();
+        return (
+          (hasRole('principal') && user.schoolId == request.resource.data.schoolId) ||
+          (hasRole('teacher') && user.schoolId == request.resource.data.schoolId && 
+           request.resource.data.class == user.class && 
+           request.resource.data.division == user.division) ||
+          hasRole('superadmin')
+        );
+      }
+
+      allow read: if isSignedIn() && canViewStudents();
+      allow write: if isSignedIn() && canManageStudents();
+    }
+
+    // ─── ATTENDANCE COLLECTION ──────────────────────────────────────────
+    match /attendance/{attendanceId} {
+      function canViewAttendance() {
+        let user = currentUser();
+        return (
+          (hasRole('principal') && user.schoolId == resource.data.schoolId) ||
+          (hasRole('teacher') && user.schoolId == resource.data.schoolId && 
+           resource.data.class == user.class && 
+           resource.data.division == user.division) ||
+          hasRole('superadmin')
+        );
+      }
+
+      function canManageAttendance() {
+        let user = currentUser();
+        return (
+          (hasRole('principal') && user.schoolId == request.resource.data.schoolId) ||
+          (hasRole('teacher') && user.schoolId == request.resource.data.schoolId && 
+           request.resource.data.class == user.class && 
+           request.resource.data.division == user.division) ||
+          hasRole('superadmin')
+        );
+      }
+
+      allow read: if isSignedIn() && canViewAttendance();
+      allow write: if isSignedIn() && canManageAttendance();
+    }
+  }
+}

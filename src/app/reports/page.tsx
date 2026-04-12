@@ -271,36 +271,45 @@ export default function ReportsPage() {
                             <TrendingUp className="w-4 h-4 text-emerald-500" />
                             Daily Participation Trend
                         </h3>
-                        <div className="h-64 w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={trendData}>
-                                    <defs>
-                                        <linearGradient id="colorTrend" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.15} />
-                                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                                        </linearGradient>
-                                    </defs>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                    <XAxis
-                                        dataKey="day"
-                                        axisLine={false}
-                                        tickLine={false}
-                                        tick={{ fontSize: 10, fontWeight: 900, fill: '#94a3b8' }}
-                                        label={{ value: 'Day of Month', position: 'insideBottom', offset: -5, fontSize: 10, fontWeight: 900, fill: '#94a3b8' }}
-                                    />
-                                    <YAxis
-                                        domain={[0, 100]}
-                                        axisLine={false}
-                                        tickLine={false}
-                                        tick={{ fontSize: 10, fontWeight: 900, fill: '#94a3b8' }}
-                                    />
-                                    <Tooltip
-                                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)', padding: '16px' }}
-                                        labelStyle={{ fontWeight: 900, textTransform: 'uppercase', fontSize: '10px', color: '#64748b', marginBottom: '4px' }}
-                                    />
-                                    <Area type="monotone" dataKey="attendance" stroke="#3b82f6" strokeWidth={4} fill="url(#colorTrend)" />
-                                </AreaChart>
-                            </ResponsiveContainer>
+                        <div className="w-full min-h-[300px] relative">
+                            {loading ? (
+                                <div className="absolute inset-0 flex items-center justify-center bg-slate-50/50 dark:bg-slate-800/20 rounded-2xl animate-pulse">
+                                    <div className="flex flex-col items-center gap-2">
+                                        <Loader2 className="w-8 h-8 text-blue-600 animate-spin opacity-20" />
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Loading Analytics...</p>
+                                    </div>
+                                </div>
+                            ) : (
+                                <ResponsiveContainer width="100%" height={300}>
+                                    <AreaChart data={trendData}>
+                                        <defs>
+                                            <linearGradient id="colorTrend" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.15} />
+                                                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                                            </linearGradient>
+                                        </defs>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                        <XAxis
+                                            dataKey="day"
+                                            axisLine={false}
+                                            tickLine={false}
+                                            tick={{ fontSize: 10, fontWeight: 900, fill: '#94a3b8' }}
+                                            label={{ value: 'Day of Month', position: 'insideBottom', offset: -5, fontSize: 10, fontWeight: 900, fill: '#94a3b8' }}
+                                        />
+                                        <YAxis
+                                            domain={[0, 100]}
+                                            axisLine={false}
+                                            tickLine={false}
+                                            tick={{ fontSize: 10, fontWeight: 900, fill: '#94a3b8' }}
+                                        />
+                                        <Tooltip
+                                            contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)', padding: '16px' }}
+                                            labelStyle={{ fontWeight: 900, textTransform: 'uppercase', fontSize: '10px', color: '#64748b', marginBottom: '4px' }}
+                                        />
+                                        <Area type="monotone" dataKey="attendance" stroke="#3b82f6" strokeWidth={4} fill="url(#colorTrend)" />
+                                    </AreaChart>
+                                </ResponsiveContainer>
+                            )}
                         </div>
                     </Card>
 
@@ -310,20 +319,29 @@ export default function ReportsPage() {
                             <BarChart3 className="w-4 h-4 text-indigo-600" />
                             Class-wise Comparison
                         </h3>
-                        <div className="h-64 w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={classSummary}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 900, fill: '#94a3b8' }} />
-                                    <YAxis domain={[0, 100]} axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 900, fill: '#94a3b8' }} />
-                                    <Tooltip contentStyle={{ borderRadius: '16px', border: 'none' }} />
-                                    <Bar dataKey="attendance" fill="#6366f1" radius={[8, 8, 0, 0]} barSize={40}>
-                                        {classSummary.map((entry, index) => (
-                                            <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#6366f1' : '#8b5cf6'} />
-                                        ))}
-                                    </Bar>
-                                </BarChart>
-                            </ResponsiveContainer>
+                        <div className="w-full min-h-[300px] relative">
+                            {loading ? (
+                                <div className="absolute inset-0 flex items-center justify-center bg-slate-50/50 dark:bg-slate-800/20 rounded-2xl animate-pulse">
+                                    <div className="flex flex-col items-center gap-2">
+                                        <Loader2 className="w-8 h-8 text-indigo-600 animate-spin opacity-20" />
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Loading Analytics...</p>
+                                    </div>
+                                </div>
+                            ) : (
+                                <ResponsiveContainer width="100%" height={300}>
+                                    <BarChart data={classSummary}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 900, fill: '#94a3b8' }} />
+                                        <YAxis domain={[0, 100]} axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 900, fill: '#94a3b8' }} />
+                                        <Tooltip contentStyle={{ borderRadius: '16px', border: 'none' }} />
+                                        <Bar dataKey="attendance" fill="#6366f1" radius={[8, 8, 0, 0]} barSize={40}>
+                                            {classSummary.map((entry, index) => (
+                                                <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#6366f1' : '#8b5cf6'} />
+                                            ))}
+                                        </Bar>
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            )}
                         </div>
                     </Card>
                 </div>

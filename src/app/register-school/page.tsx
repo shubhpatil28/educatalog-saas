@@ -2,13 +2,15 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-    createUserWithEmailAndPassword,
-} from 'firebase/auth';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
 import {
     doc,
     setDoc,
-    getDoc,
+    collection,
+    getDocs,
+    query,
+    orderBy,
+    limit,
     serverTimestamp,
     Timestamp
 } from 'firebase/firestore';
@@ -18,170 +20,308 @@ import {
     School,
     User,
     Mail,
-    Phone,
+    MapPin,
     Lock,
     ShieldCheck,
     ArrowRight,
+    ArrowLeft,
     Loader2,
     AlertCircle,
-    CheckCircle2
+    CheckCircle2,
+    Users,
+    CreditCard,
+    Sparkles,
+    Building2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
+
+// ─── Auto-generate a unique SCH-XXXX ID ────────────────────────────────────
+async function generateSchoolId(): Promise<string> {
+    try {
+        const schoolsRef = collection(db, 'schools');
+        // Get all school docs and find the highest SCH-XXXX number
+        const snap = await getDocs(query(schoolsRef, orderBy('__name__'), limit(1000)));
+        let maxNum = 1000;
+        snap.docs.forEach(d => {
+            const match = d.id.match(/^SCH-(\d+)$/);
+            if (match) {
+                const num = parseInt(match[1], 10);
+                if (num >= maxNum) maxNum = num + 1;
+            }
+        });
+        return `SCH-${maxNum}`;
+    } catch {
+        // Fallback using timestamp-based suffix
+        return `SCH-${1000 + Math.floor(Date.now() % 9000)}`;
+    }
+}
+
+const PLAN_OPTIONS = [
+    {
+        value: 'Basic',
+        label: 'Basic',
+        description: 'Up to 200 students, core analytics',
+        price: 'Free Trial',
+        color: 'from-slate-500 to-slate-600',
+        bg: 'bg-slate-50 dark:bg-slate-800/40',
+        border: 'border-slate-300 dark:border-slate-700',
+        activeBorder: 'border-blue-500',
+        activeBg: 'bg-blue-50 dark:bg-blue-900/20',
+    },
+    {
+        value: 'Premium',
+        label: 'Premium',
+        description: 'Unlimited students, advanced SaaS features',
+        price: '₹2,999 / yr',
+        color: 'from-blue-600 to-indigo-600',
+        bg: 'bg-indigo-50 dark:bg-indigo-900/20',
+        border: 'border-indigo-300 dark:border-indigo-700',
+        activeBorder: 'border-indigo-600',
+        activeBg: 'bg-indigo-50 dark:bg-indigo-900/30',
+    },
+];
+
+type FormData = {
+    // Step 1 – School Details
+    schoolName: string;
+    city: string;
+    phone: string;
+    numStudents: string;
+    plan: 'Basic' | 'Premium';
+    // Step 2 – Admin Credentials
+    adminName: string;
+    email: string;
+    password: string;
+    confirmPassword: string;
+};
 
 export default function RegisterSchoolPage() {
     const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState(false);
+    const [generatedSchoolId, setGeneratedSchoolId] = useState('');
     const router = useRouter();
 
-    const [formData, setFormData] = useState({
-        // School Details
+    const [formData, setFormData] = useState<FormData>({
         schoolName: '',
-        schoolCode: '',
+        city: '',
         phone: '',
-        // Principal Details
-        principalName: '',
+        numStudents: '',
+        plan: 'Basic',
+        adminName: '',
         email: '',
         password: '',
-        confirmPassword: ''
+        confirmPassword: '',
     });
 
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setFormData({ ...formData, [e.target.name]: e.target.value });
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+        setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+        setError(null);
     };
 
+    // ── Step 1 validation ────────────────────────────────────────────────
+    const handleNextStep = () => {
+        if (!formData.schoolName.trim()) return setError('Institution name is required.');
+        if (!formData.city.trim()) return setError('City is required.');
+        if (!formData.numStudents || isNaN(Number(formData.numStudents)) || Number(formData.numStudents) < 1)
+            return setError('Please enter a valid number of students.');
+        setError(null);
+        setStep(2);
+    };
+
+    // ── Final submission ─────────────────────────────────────────────────
     const handleRegister = async (e: React.FormEvent) => {
         e.preventDefault();
-        setLoading(true);
         setError(null);
 
-        // Validation
-        if (formData.password.length < 6) {
-            setError("Password must be at least 6 characters.");
-            setLoading(false);
-            return;
-        }
+        if (!formData.adminName.trim()) return setError('Admin name is required.');
+        if (!formData.email.trim()) return setError('Email is required.');
+        if (formData.password.length < 6) return setError('Password must be at least 6 characters.');
+        if (formData.password !== formData.confirmPassword) return setError('Passwords do not match.');
 
-        if (formData.password !== formData.confirmPassword) {
-            setError("Passwords do not match.");
-            setLoading(false);
-            return;
-        }
-
+        setLoading(true);
         try {
-            // 1. Check if School Code is unique
-            const schoolDocRef = doc(db, 'schools', formData.schoolCode.toUpperCase());
-            const schoolDoc = await getDoc(schoolDocRef);
+            // 1. Generate unique School ID
+            const schoolId = await generateSchoolId();
 
-            if (schoolDoc.exists()) {
-                setError("This institution code is already registered.");
-                setLoading(false);
-                return;
-            }
-
-            // 2. Create Firebase Auth Account
+            // 2. Create Firebase Auth account
             const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
             const uid = userCredential.user.uid;
 
-            // 3. Create School Document
+            // 3. Calculate trial / plan expiry
             const trialExpiry = new Date();
             trialExpiry.setDate(trialExpiry.getDate() + 30);
 
-            await setDoc(schoolDocRef, {
-                name: formData.schoolName,
-                principalName: formData.principalName,
-                email: formData.email,
-                phone: formData.phone,
-                schoolCode: formData.schoolCode.toUpperCase(),
-                plan: "trial",
+            // 4. Write schools/{schoolId}
+            await setDoc(doc(db, 'schools', schoolId), {
+                schoolId,
+                code: schoolId,
+                name: formData.schoolName.trim(),
+                city: formData.city.trim(),
+                phone: formData.phone.trim(),
+                principalName: formData.adminName.trim(),
+                email: formData.email.trim(),
+                numStudents: Number(formData.numStudents),
+                plan: formData.plan.toLowerCase() as 'basic' | 'premium',
+                subscriptionStatus: 'active',
+                paymentStatus: 'pending',
                 trialDays: 30,
-                subscriptionStatus: "active",
                 createdAt: serverTimestamp(),
-                expiryDate: Timestamp.fromDate(trialExpiry)
+                expiryDate: Timestamp.fromDate(trialExpiry),
             });
 
-            // 4. Create Principal Profile
+            // 5. Write users/{uid}
             await setDoc(doc(db, 'users', uid), {
-                name: formData.principalName,
-                email: formData.email,
-                role: "principal",
-                schoolId: formData.schoolCode.toUpperCase(),
-                status: "Active",
-                createdAt: serverTimestamp()
+                uid,
+                name: formData.adminName.trim(),
+                email: formData.email.trim(),
+                role: 'principal',
+                schoolId,
+                class: null,
+                division: null,
+                status: 'active',
+                createdAt: serverTimestamp(),
             });
 
+            // 6. Sign out so the user re-authenticates on /login
+            await auth.signOut();
+
+            setGeneratedSchoolId(schoolId);
             setSuccess(true);
+
             setTimeout(() => {
-                router.push('/dashboard/principal');
-            }, 2000);
+                router.push('/login');
+            }, 3500);
 
         } catch (err: any) {
             console.error(err);
-            setError(err.message || "An error occurred during registration.");
+            let msg = 'Registration failed. Please try again.';
+            if (err.code === 'auth/email-already-in-use') msg = 'This email is already registered.';
+            else if (err.code === 'auth/invalid-email') msg = 'The email address is not valid.';
+            else if (err.message) msg = err.message;
+            setError(msg);
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative overflow-hidden">
-            {/* Background Aesthetics */}
-            <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-blue-500/10 rounded-full blur-3xl -mr-64 -mt-32 animate-pulse" />
-            <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-indigo-500/10 rounded-full blur-3xl -ml-64 -mb-32 animate-pulse delay-1000" />
+        <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/40 dark:from-slate-950 dark:via-slate-900 dark:to-indigo-950/30 flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative overflow-hidden">
+            {/* Decorative blobs */}
+            <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-blue-500/8 rounded-full blur-3xl -mr-72 -mt-40 pointer-events-none" />
+            <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-indigo-500/8 rounded-full blur-3xl -ml-72 -mb-40 pointer-events-none" />
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-blue-400/3 rounded-full blur-3xl pointer-events-none" />
 
-            <div className="sm:mx-auto sm:w-full sm:max-w-md relative z-10 text-center">
-                <div className="inline-flex items-center justify-center p-4 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-[2rem] shadow-2xl shadow-blue-500/20 mb-6 text-white rotate-3 hover:rotate-0 transition-transform duration-500">
-                    <School className="w-10 h-10" />
-                </div>
-                <h2 className="text-4xl font-black text-slate-900 dark:text-white tracking-tight">Onboard Institution</h2>
-                <p className="mt-2 text-sm font-bold text-slate-400 uppercase tracking-[0.2em]">Start your 30-Day Free Trial</p>
+            {/* Header */}
+            <div className="sm:mx-auto sm:w-full sm:max-w-lg relative z-10 text-center mb-8">
+                <motion.div
+                    initial={{ opacity: 0, y: -20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="inline-flex items-center justify-center p-4 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-[2rem] shadow-2xl shadow-blue-500/25 mb-6 text-white hover:rotate-3 transition-transform duration-500"
+                >
+                    <Building2 className="w-10 h-10" />
+                </motion.div>
+                <motion.h1
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.1 }}
+                    className="text-4xl font-black text-slate-900 dark:text-white tracking-tight"
+                >
+                    Onboard Institution
+                </motion.h1>
+                <motion.p
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.2 }}
+                    className="mt-2 text-[11px] font-black text-slate-400 uppercase tracking-[0.25em]"
+                >
+                    EduCatalog SaaS • 30-Day Free Trial
+                </motion.p>
             </div>
 
-            <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-xl relative z-10">
+            {/* Card */}
+            <div className="sm:mx-auto sm:w-full sm:max-w-xl relative z-10 px-4">
                 <Card className="px-8 py-10 border-slate-100 dark:border-slate-800 shadow-2xl bg-white/80 dark:bg-slate-900/80 backdrop-blur-2xl rounded-[2.5rem]">
                     <AnimatePresence mode="wait">
+
+                        {/* ── SUCCESS STATE ───────────────────────────────── */}
                         {success ? (
                             <motion.div
+                                key="success"
                                 initial={{ opacity: 0, scale: 0.9 }}
                                 animate={{ opacity: 1, scale: 1 }}
-                                className="flex flex-col items-center justify-center py-12 text-center"
+                                className="flex flex-col items-center justify-center py-10 text-center gap-5"
                             >
-                                <div className="w-24 h-24 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center text-emerald-600 mb-6">
+                                <div className="w-24 h-24 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center text-emerald-500">
                                     <CheckCircle2 className="w-12 h-12" />
                                 </div>
-                                <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-2">Workspace Initialized!</h3>
-                                <p className="text-slate-500 font-medium">Redirecting you to your new institutional headquarters...</p>
+                                <div>
+                                    <h3 className="text-2xl font-black text-slate-900 dark:text-white">Workspace Ready!</h3>
+                                    <p className="text-slate-500 text-sm font-medium mt-1">Your institutional portal has been created.</p>
+                                </div>
+                                <div className="px-6 py-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-2xl w-full max-w-xs">
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Your Institutional Code</p>
+                                    <p className="text-3xl font-black text-blue-600 tracking-widest">{generatedSchoolId}</p>
+                                    <p className="text-[10px] text-slate-500 mt-1 font-medium">Save this — you'll need it to log in</p>
+                                </div>
+                                <div className="flex items-center gap-2 text-slate-400">
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    <p className="text-xs font-bold uppercase tracking-widest">Redirecting to login...</p>
+                                </div>
                             </motion.div>
+
                         ) : (
-                            <form className="space-y-8" onSubmit={handleRegister}>
-                                {/* Progress Indicator */}
-                                <div className="flex items-center justify-center gap-2 mb-4">
-                                    <div className={cn("h-1.5 rounded-full transition-all duration-500", step === 1 ? "w-12 bg-blue-600" : "w-4 bg-slate-200")} />
-                                    <div className={cn("h-1.5 rounded-full transition-all duration-500", step === 2 ? "w-12 bg-blue-600" : "w-4 bg-slate-200")} />
+                            <form onSubmit={handleRegister} className="space-y-7">
+
+                                {/* Progress Dots */}
+                                <div className="flex items-center justify-center gap-3 mb-2">
+                                    {[1, 2].map(s => (
+                                        <div key={s} className="flex items-center gap-3">
+                                            <div className={cn(
+                                                "w-8 h-8 rounded-full flex items-center justify-center text-xs font-black transition-all duration-500",
+                                                step >= s
+                                                    ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30"
+                                                    : "bg-slate-100 dark:bg-slate-800 text-slate-400"
+                                            )}>
+                                                {step > s ? <CheckCircle2 className="w-4 h-4" /> : s}
+                                            </div>
+                                            {s < 2 && (
+                                                <div className={cn(
+                                                    "h-0.5 w-16 rounded-full transition-all duration-500",
+                                                    step > s ? "bg-blue-600" : "bg-slate-200 dark:bg-slate-700"
+                                                )} />
+                                            )}
+                                        </div>
+                                    ))}
                                 </div>
 
-                                {step === 1 ? (
+                                {/* ── STEP 1 : School Details ─────────────────── */}
+                                {step === 1 && (
                                     <motion.div
-                                        initial={{ opacity: 0, x: 20 }}
+                                        key="step1"
+                                        initial={{ opacity: 0, x: 30 }}
                                         animate={{ opacity: 1, x: 0 }}
-                                        exit={{ opacity: 0, x: -20 }}
-                                        className="space-y-6"
+                                        exit={{ opacity: 0, x: -30 }}
+                                        className="space-y-5"
                                     >
-                                        <div className="flex items-center gap-4 mb-8">
+                                        <div className="flex items-center gap-4 mb-6">
                                             <div className="p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-600 rounded-2xl">
                                                 <ShieldCheck className="w-6 h-6" />
                                             </div>
                                             <div>
-                                                <h3 className="text-xl font-black text-slate-900 dark:text-white">School Registry</h3>
-                                                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Institutional Identity</p>
+                                                <h3 className="text-xl font-black text-slate-900 dark:text-white">School Details</h3>
+                                                <p className="text-[11px] text-slate-400 font-black uppercase tracking-widest">Institutional Identity</p>
                                             </div>
                                         </div>
 
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {/* School Name */}
+                                        <div className="space-y-1.5">
+                                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                                                <School className="w-3 h-3" /> School Name
+                                            </label>
                                             <Input
-                                                label="Institution Name"
                                                 name="schoolName"
                                                 placeholder="e.g. Sunrise Academy"
                                                 value={formData.schoolName}
@@ -189,143 +329,249 @@ export default function RegisterSchoolPage() {
                                                 required
                                                 className="h-14 rounded-2xl"
                                             />
+                                        </div>
+
+                                        {/* City */}
+                                        <div className="space-y-1.5">
+                                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                                                <MapPin className="w-3 h-3" /> City
+                                            </label>
                                             <Input
-                                                label="Unique School Code"
-                                                name="schoolCode"
-                                                placeholder="e.g. SUN-2026"
-                                                value={formData.schoolCode}
+                                                name="city"
+                                                placeholder="e.g. Pune"
+                                                value={formData.city}
                                                 onChange={handleChange}
                                                 required
-                                                className="h-14 rounded-2xl uppercase"
+                                                className="h-14 rounded-2xl"
                                             />
                                         </div>
-                                        <Input
-                                            label="Official Phone Number"
-                                            name="phone"
-                                            placeholder="+91 98765 43210"
-                                            value={formData.phone}
-                                            onChange={handleChange}
-                                            required
-                                            className="h-14 rounded-2xl"
-                                        />
+
+                                        {/* Number of Students */}
+                                        <div className="space-y-1.5">
+                                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                                                <Users className="w-3 h-3" /> Number of Students
+                                            </label>
+                                            <Input
+                                                name="numStudents"
+                                                type="number"
+                                                min="1"
+                                                max="10000"
+                                                placeholder="e.g. 450"
+                                                value={formData.numStudents}
+                                                onChange={handleChange}
+                                                required
+                                                className="h-14 rounded-2xl"
+                                            />
+                                        </div>
+
+                                        {/* Plan Selector */}
+                                        <div className="space-y-2.5">
+                                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                                                <CreditCard className="w-3 h-3" /> Subscription Plan
+                                            </label>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                {PLAN_OPTIONS.map(plan => (
+                                                    <button
+                                                        key={plan.value}
+                                                        type="button"
+                                                        onClick={() => setFormData(p => ({ ...p, plan: plan.value as 'Basic' | 'Premium' }))}
+                                                        className={cn(
+                                                            "relative p-4 rounded-2xl border-2 text-left transition-all duration-300 cursor-pointer",
+                                                            formData.plan === plan.value
+                                                                ? `${plan.activeBorder} ${plan.activeBg} scale-[1.02] shadow-md`
+                                                                : `${plan.border} ${plan.bg} hover:scale-[1.01]`
+                                                        )}
+                                                    >
+                                                        {plan.value === 'Premium' && (
+                                                            <span className="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-[9px] font-black uppercase rounded-full tracking-wider">
+                                                                <Sparkles className="w-2.5 h-2.5" /> Pro
+                                                            </span>
+                                                        )}
+                                                        <p className="font-black text-slate-900 dark:text-white text-sm">{plan.label}</p>
+                                                        <p className="text-[10px] text-slate-500 font-medium mt-0.5">{plan.description}</p>
+                                                        <p className="text-[11px] font-black text-blue-600 mt-1.5">{plan.price}</p>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Error */}
+                                        {error && (
+                                            <motion.div
+                                                initial={{ opacity: 0, y: 8 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                className="p-4 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/20 rounded-2xl text-red-600 dark:text-red-400 text-sm font-bold flex items-center gap-3"
+                                            >
+                                                <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                                                {error}
+                                            </motion.div>
+                                        )}
 
                                         <Button
                                             type="button"
-                                            className="w-full h-14 rounded-2xl font-black uppercase text-xs tracking-widest gap-2 bg-slate-900"
-                                            onClick={() => setStep(2)}
+                                            className="w-full h-14 rounded-2xl font-black uppercase text-xs tracking-widest gap-2 bg-slate-900 dark:bg-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100"
+                                            onClick={handleNextStep}
                                         >
-                                            Next: Principal Details
+                                            Next: Admin Credentials
                                             <ArrowRight className="w-4 h-4" />
                                         </Button>
                                     </motion.div>
-                                ) : (
+                                )}
+
+                                {/* ── STEP 2 : Admin Credentials ──────────────── */}
+                                {step === 2 && (
                                     <motion.div
-                                        initial={{ opacity: 0, x: 20 }}
+                                        key="step2"
+                                        initial={{ opacity: 0, x: 30 }}
                                         animate={{ opacity: 1, x: 0 }}
-                                        exit={{ opacity: 0, x: -20 }}
-                                        className="space-y-6"
+                                        exit={{ opacity: 0, x: -30 }}
+                                        className="space-y-5"
                                     >
-                                        <div className="flex items-center gap-4 mb-8">
-                                            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-600 rounded-2xl">
+                                        <div className="flex items-center gap-4 mb-6">
+                                            <div className="p-3 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 rounded-2xl">
                                                 <User className="w-6 h-6" />
                                             </div>
                                             <div>
-                                                <h3 className="text-xl font-black text-slate-900 dark:text-white">Principal Credentials</h3>
-                                                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Administrative Access</p>
+                                                <h3 className="text-xl font-black text-slate-900 dark:text-white">Admin Credentials</h3>
+                                                <p className="text-[11px] text-slate-400 font-black uppercase tracking-widest">Principal Access</p>
                                             </div>
                                         </div>
 
-                                        <Input
-                                            label="Full Name"
-                                            name="principalName"
-                                            placeholder="Amit Sharma"
-                                            value={formData.principalName}
-                                            onChange={handleChange}
-                                            required
-                                            className="h-14 rounded-2xl"
-                                        />
-                                        <Input
-                                            label="Professional Email"
-                                            name="email"
-                                            type="email"
-                                            placeholder="principal@school.com"
-                                            value={formData.email}
-                                            onChange={handleChange}
-                                            required
-                                            className="h-14 rounded-2xl"
-                                        />
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {/* Preview banner */}
+                                        <div className="flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-100 dark:border-blue-800/50 rounded-2xl">
+                                            <Building2 className="w-5 h-5 text-blue-500 flex-shrink-0" />
+                                            <div>
+                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Registering for</p>
+                                                <p className="text-sm font-black text-slate-800 dark:text-white">{formData.schoolName} • {formData.city}</p>
+                                            </div>
+                                            <span className={cn(
+                                                "ml-auto text-[10px] font-black px-2 py-1 rounded-lg uppercase tracking-wider",
+                                                formData.plan === 'Premium'
+                                                    ? "bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600"
+                                                    : "bg-slate-100 dark:bg-slate-800 text-slate-500"
+                                            )}>
+                                                {formData.plan}
+                                            </span>
+                                        </div>
+
+                                        {/* Admin Name */}
+                                        <div className="space-y-1.5">
+                                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                                                <User className="w-3 h-3" /> Admin Name
+                                            </label>
                                             <Input
-                                                label="Create Password"
-                                                name="password"
-                                                type="password"
-                                                placeholder="••••••••"
-                                                value={formData.password}
-                                                onChange={handleChange}
-                                                required
-                                                className="h-14 rounded-2xl"
-                                            />
-                                            <Input
-                                                label="Confirm Password"
-                                                name="confirmPassword"
-                                                type="password"
-                                                placeholder="••••••••"
-                                                value={formData.confirmPassword}
+                                                name="adminName"
+                                                placeholder="e.g. Suresh Patil"
+                                                value={formData.adminName}
                                                 onChange={handleChange}
                                                 required
                                                 className="h-14 rounded-2xl"
                                             />
                                         </div>
 
-                                        <div className="flex flex-col gap-4">
+                                        {/* Email */}
+                                        <div className="space-y-1.5">
+                                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                                                <Mail className="w-3 h-3" /> Admin Email
+                                            </label>
+                                            <Input
+                                                name="email"
+                                                type="email"
+                                                placeholder="admin@school.com"
+                                                value={formData.email}
+                                                onChange={handleChange}
+                                                required
+                                                className="h-14 rounded-2xl"
+                                            />
+                                        </div>
+
+                                        {/* Passwords */}
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div className="space-y-1.5">
+                                                <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                                                    <Lock className="w-3 h-3" /> Password
+                                                </label>
+                                                <Input
+                                                    name="password"
+                                                    type="password"
+                                                    placeholder="••••••••"
+                                                    value={formData.password}
+                                                    onChange={handleChange}
+                                                    required
+                                                    className="h-14 rounded-2xl"
+                                                />
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                                                    <Lock className="w-3 h-3" /> Confirm
+                                                </label>
+                                                <Input
+                                                    name="confirmPassword"
+                                                    type="password"
+                                                    placeholder="••••••••"
+                                                    value={formData.confirmPassword}
+                                                    onChange={handleChange}
+                                                    required
+                                                    className="h-14 rounded-2xl"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        {/* Error */}
+                                        {error && (
+                                            <motion.div
+                                                initial={{ opacity: 0, y: 8 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                className="p-4 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/20 rounded-2xl text-red-600 dark:text-red-400 text-sm font-bold flex items-center gap-3"
+                                            >
+                                                <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                                                {error}
+                                            </motion.div>
+                                        )}
+
+                                        <div className="flex flex-col gap-3">
                                             <Button
                                                 type="submit"
                                                 className="w-full h-14 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-blue-500/20"
                                                 isLoading={loading}
                                                 disabled={loading}
                                             >
-                                                {loading ? "Provisioning Vault..." : "Establish Workspace"}
+                                                {loading ? 'Provisioning Workspace...' : 'Establish Workspace'}
                                             </Button>
                                             <Button
                                                 type="button"
                                                 variant="outline"
                                                 className="w-full h-14 rounded-2xl font-black uppercase text-xs tracking-widest"
-                                                onClick={() => setStep(1)}
+                                                onClick={() => { setStep(1); setError(null); }}
+                                                disabled={loading}
                                             >
+                                                <ArrowLeft className="w-4 h-4 mr-2" />
                                                 Back: School Details
                                             </Button>
                                         </div>
-                                    </motion.div>
-                                )}
-
-                                {error && (
-                                    <motion.div
-                                        initial={{ opacity: 0, y: 10 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        className="p-4 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/20 rounded-2xl text-red-600 dark:text-red-400 text-sm font-bold flex items-center gap-3"
-                                    >
-                                        <AlertCircle className="w-5 h-5 flex-shrink-0" />
-                                        {error}
                                     </motion.div>
                                 )}
                             </form>
                         )}
                     </AnimatePresence>
 
-                    <div className="mt-10 pt-8 border-t border-slate-100 dark:border-slate-800 text-center">
-                        <p className="text-slate-500 font-medium">
-                            Already registered? {' '}
-                            <Link href="/login" className="text-blue-600 font-black uppercase tracking-widest text-[10px] hover:underline underline-offset-4">
-                                Sign In here
-                            </Link>
-                        </p>
-                    </div>
+                    {/* Footer link */}
+                    {!success && (
+                        <div className="mt-10 pt-8 border-t border-slate-100 dark:border-slate-800 text-center">
+                            <p className="text-slate-500 font-medium text-sm">
+                                Already registered?{' '}
+                                <Link href="/login" className="text-blue-600 font-black uppercase tracking-widest text-[10px] hover:underline underline-offset-4">
+                                    Sign In here
+                                </Link>
+                            </p>
+                        </div>
+                    )}
                 </Card>
-            </div>
 
-            <p className="mt-8 text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">
-                Protected by Institutional Grade Security & Multi-Tenant Isolation
-            </p>
+                <p className="mt-6 text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">
+                    Protected by Institutional-Grade Multi-Tenant Isolation
+                </p>
+            </div>
         </div>
     );
 }
