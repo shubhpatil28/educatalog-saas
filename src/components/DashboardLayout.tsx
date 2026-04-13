@@ -93,7 +93,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, allo
                     </div>
 
                     <Button
-                        onClick={() => setPayModalOpen(true)}
+                        onClick={() => alert("Payment feature is disabled for now")}
                         className="w-full h-14 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-blue-500/20 gap-2"
                     >
                         <Zap className="w-4 h-4" />
@@ -137,7 +137,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, allo
                     <div className="flex items-center gap-4">
                         {!isSubscriptionActive && !paidPlan && (
                             <button
-                                onClick={() => setPayModalOpen(true)}
+                                onClick={() => alert("Payment feature is disabled for now")}
                                 className="flex items-center gap-2 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 px-4 py-1.5 rounded-full text-xs font-bold border border-amber-100 dark:border-amber-900/30 hover:bg-amber-100 transition-colors"
                             >
                                 <AlertTriangle className="w-3.5 h-3.5" />
@@ -164,7 +164,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, allo
                                     </div>
                                 </div>
                                 <button
-                                    onClick={() => setPayModalOpen(true)}
+                                    onClick={() => alert("Payment feature is disabled for now")}
                                     className="flex-shrink-0 flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-black shadow-lg shadow-blue-600/20 uppercase tracking-wider transition-colors"
                                 >
                                     <Zap className="w-4 h-4" />

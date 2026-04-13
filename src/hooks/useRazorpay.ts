@@ -56,7 +56,14 @@ export function useRazorpay() {
             return;
         }
 
-        const { orderId, amount, currency, keyId } = await orderRes.json();
+        const data = await orderRes.json();
+        
+        if (data.success === false) {
+            opts.onFailure(data.message || 'Payment system is currently disabled.');
+            return;
+        }
+
+        const { orderId, amount, currency, keyId } = data;
 
         // 2. Open Razorpay popup
         const rzp = new window.Razorpay({

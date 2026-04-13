@@ -88,28 +88,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     const { openCheckout } = useRazorpay();
 
     const handlePay = async () => {
-        setStatus('loading');
-        setMessage('');
-
-        await openCheckout({
-            schoolId,
-            schoolName,
-            plan: selectedPlan,
-            email,
-            onSuccess: (expiryDate) => {
-                setStatus('success');
-                setMessage(expiryDate);
-                onPaymentSuccess(selectedPlan, expiryDate);
-            },
-            onFailure: (error) => {
-                if (error === 'Payment was cancelled.') {
-                    setStatus('idle');
-                } else {
-                    setStatus('error');
-                    setMessage(error);
-                }
-            },
-        });
+        alert("Payment feature is disabled for now");
+        setStatus('idle');
     };
 
     const handleClose = () => {
