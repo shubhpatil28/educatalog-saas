@@ -101,6 +101,7 @@ export default function RegisterSchoolPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState(false);
+    const [successMessage, setSuccessMessage] = useState<string | null>(null);
     const [generatedSchoolId, setGeneratedSchoolId] = useState('');
     const router = useRouter();
 
@@ -143,12 +144,12 @@ export default function RegisterSchoolPage() {
 
         setLoading(true);
         try {
-            // 1. Generate unique School ID
-            const schoolId = await generateSchoolId();
-
-            // 2. Create Firebase Auth account
+            // 1. Create Firebase Auth account FIRST to satisfy authenticated Firestore rules
             const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
             const uid = userCredential.user.uid;
+
+            // 2. Generate unique School ID now that we are authenticated
+            const schoolId = await generateSchoolId();
 
             // 3. Calculate trial / plan expiry
             const trialExpiry = new Date();
@@ -185,19 +186,18 @@ export default function RegisterSchoolPage() {
                 createdAt: serverTimestamp(),
             });
 
-            // 6. Sign out so the user re-authenticates on /login
-            await auth.signOut();
-
             setGeneratedSchoolId(schoolId);
             setSuccess(true);
+            setSuccessMessage("Workspace created successfully! Preparing your dashboard...");
 
+            // No longer signing out to allow immediate access
             setTimeout(() => {
-                router.push('/login');
-            }, 3500);
+                router.push('/dashboard/principal');
+            }, 2000);
 
         } catch (err: any) {
             console.error(err);
-            let msg = 'Registration failed. Please try again.';
+            let msg = 'Unable to create workspace. Please try again.';
             if (err.code === 'auth/email-already-in-use') msg = 'This email is already registered.';
             else if (err.code === 'auth/invalid-email') msg = 'The email address is not valid.';
             else if (err.message) msg = err.message;
@@ -259,16 +259,16 @@ export default function RegisterSchoolPage() {
                                 </div>
                                 <div>
                                     <h3 className="text-2xl font-black text-slate-900 dark:text-white">Workspace Ready!</h3>
-                                    <p className="text-slate-500 text-sm font-medium mt-1">Your institutional portal has been created.</p>
+                                    <p className="text-slate-500 text-sm font-medium mt-1">{successMessage || 'Your institutional portal has been created.'}</p>
                                 </div>
                                 <div className="px-6 py-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-2xl w-full max-w-xs">
                                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Your Institutional Code</p>
                                     <p className="text-3xl font-black text-blue-600 tracking-widest">{generatedSchoolId}</p>
-                                    <p className="text-[10px] text-slate-500 mt-1 font-medium">Save this — you'll need it to log in</p>
+                                    <p className="text-[10px] text-slate-500 mt-1 font-medium">Save this — you'll need it for future logins</p>
                                 </div>
                                 <div className="flex items-center gap-2 text-slate-400">
                                     <Loader2 className="w-4 h-4 animate-spin" />
-                                    <p className="text-xs font-bold uppercase tracking-widest">Redirecting to login...</p>
+                                    <p className="text-xs font-bold uppercase tracking-widest">Entering Dashboard...</p>
                                 </div>
                             </motion.div>
 

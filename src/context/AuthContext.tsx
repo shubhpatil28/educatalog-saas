@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { UserProfile, SchoolInfo } from '@/types';
 
@@ -33,13 +33,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setUser(firebaseUser);
             if (firebaseUser) {
                 // Fetch User Profile
-                const profileDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+                const userRef = doc(db, 'users', firebaseUser.uid);
+                const profileDoc = await getDoc(userRef);
+                
                 if (profileDoc.exists()) {
                     const profileData = profileDoc.data() as UserProfile;
                     setProfile(profileData);
 
                     // Update last login
-                    await updateDoc(doc(db, 'users', firebaseUser.uid), {
+                    await updateDoc(userRef, {
                         lastLogin: serverTimestamp()
                     });
 
@@ -49,6 +51,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         if (schoolDoc.exists()) {
                             setSchool(schoolDoc.data() as SchoolInfo);
                         }
+                    }
+                } else {
+                    // AUTO-CREATE Profile if missing (Step 3 fallback)
+                    const fallbackProfile: UserProfile = {
+                        uid: firebaseUser.uid,
+                        email: firebaseUser.email || '',
+                        name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+                        role: 'principal', // Default to principal for onboarding
+                        schoolId: 'TEMP', // Placeholder schoolId
+                        status: 'Active',
+                        createdAt: serverTimestamp()
+                    };
+                    
+                    try {
+                        await setDoc(userRef, fallbackProfile);
+                        setProfile(fallbackProfile);
+                    } catch (err) {
+                        console.error("Critical: Failed to auto-create user profile:", err);
                     }
                 }
             } else {
