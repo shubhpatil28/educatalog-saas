@@ -45,6 +45,7 @@ export default function StudentCatalogPage() {
     const [selectedStudent, setSelectedStudent] = useState<any>(null);
     const [studentToDelete, setStudentToDelete] = useState<any>(null);
     const [formLoading, setFormLoading] = useState(false);
+    const fetchLock = React.useRef(false);
 
     // Form states
     const [formData, setFormData] = useState({
@@ -57,11 +58,12 @@ export default function StudentCatalogPage() {
     });
 
     const fetchStudents = async () => {
-        if (!profile?.schoolId) {
-            setLoading(false);
+        if (!profile?.schoolId || fetchLock.current) {
+            if (!profile?.schoolId) setLoading(false);
             return;
         }
         
+        fetchLock.current = true;
         setLoading(true);
 
         try {
@@ -71,28 +73,30 @@ export default function StudentCatalogPage() {
                     collection(db, 'students'),
                     where('schoolId', '==', profile.schoolId),
                     where('class', '==', profile.class),
-                    where('division', '==', profile.division),
-                    orderBy('createdAt', 'desc')
+                    where('division', '==', profile.division)
                 );
             } else {
                 q = query(
                     collection(db, 'students'),
-                    where('schoolId', '==', profile.schoolId),
-                    orderBy('createdAt', 'desc')
+                    where('schoolId', '==', profile.schoolId)
                 );
             }
 
             const snap = await getDocs(q);
             const studentData = snap.docs.map(doc => ({
                 id: doc.id,
-                ...doc.data()
+                ...doc.data() as any
             }));
+
+            // Client-side sort to be resilient to missing indexes on new schools
+            studentData.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
 
             setStudents(studentData);
         } catch (err) {
             console.error("Student Registry fetch error:", err);
         } finally {
             setLoading(false);
+            fetchLock.current = false;
         }
     };
 

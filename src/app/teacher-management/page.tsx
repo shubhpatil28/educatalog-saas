@@ -139,7 +139,10 @@ export default function TeacherManagementPage() {
             alert("Teacher account provisioned successfully.");
         } catch (error: any) {
             console.error("Error adding teacher:", error);
-            alert(error.message || "Failed to create teacher account.");
+            let msg = "Failed to create teacher account.";
+            if (error.code === 'auth/email-already-in-use') msg = "This email is already registered in the system.";
+            else if (error.message) msg = error.message;
+            alert(msg);
         } finally {
             if (secondaryApp) await deleteApp(secondaryApp);
             setActionLoading(false);

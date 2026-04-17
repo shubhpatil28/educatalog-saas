@@ -65,8 +65,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                                 console.error('[Auth] School sync error:', e);
                             }
                         }
-                    } else {
-                        // User exists in Auth but not in Firestore
+                    } else if (firebaseUser) {
+                        // User exists in Auth but not in Firestore (Self-Healing)
+                        // We set profile to null for now; the LoginPage or RegisterPage will 
+                        // attempt to fix this if they have the necessary context (like schoolId).
                         setProfile(null);
                         setSchool(null);
                     }
@@ -76,7 +78,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     setLoading(false);
                 });
             } else {
-                // User signed out
+                // Sign out protocol: Purge institutional data immediately
                 setProfile(null);
                 setSchool(null);
                 setLoading(false);

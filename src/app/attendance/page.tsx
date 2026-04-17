@@ -51,6 +51,9 @@ export default function AttendancePage() {
     const [history, setHistory] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [saveLoading, setSaveLoading] = useState(false);
+    
+    // Safety Ref to prevent duplicate fetches
+    const fetchLock = React.useRef(false);
 
     // Sync selected class with teacher profile
     useEffect(() => {
@@ -61,7 +64,8 @@ export default function AttendancePage() {
     }, [profile?.schoolId, profile?.class, profile?.division]);
 
     const fetchStudents = async () => {
-        if (!profile?.schoolId) return;
+        if (!profile?.schoolId || fetchLock.current) return;
+        fetchLock.current = true;
         setLoading(true);
 
         try {
@@ -85,6 +89,7 @@ export default function AttendancePage() {
             console.error("Attendance registry fetch error:", err);
         } finally {
             setLoading(false);
+            fetchLock.current = false;
         }
     };
 

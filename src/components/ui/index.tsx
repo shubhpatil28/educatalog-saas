@@ -98,4 +98,3 @@ export const Input: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { lab
         </div>
     );
 };
-

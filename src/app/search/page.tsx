@@ -20,8 +20,11 @@ import { motion } from 'framer-motion';
 import Link from 'next/link';
 
 export default function SearchPage() {
+    const { profile } = useAuth();
     const [query, setQuery] = useState('');
     const [activeTab, setActiveTab] = useState('Current');
+    const [results, setResults] = useState<any[]>([]);
+    const [loading, setLoading] = useState(false);
 
     const categories = [
         { label: 'Current Students', icon: UserCheck, id: 'Current' },
@@ -29,17 +32,35 @@ export default function SearchPage() {
         { label: 'Withdrawn', icon: UserMinus, id: 'Withdrawn' },
     ];
 
-    const results = [
-        { id: '1', name: 'Aryan Singh', roll: '101', class: 'Class 5-A', mobile: '9876543210', status: 'Current' },
-        { id: '2', name: 'Ishani Sharma', roll: '102', class: 'Class 3-B', mobile: '9876543211', status: 'Current' },
-        { id: '3', name: 'Kabir Verma', roll: '103', class: 'Class 8-C', mobile: '9876543212', status: 'Alumni' },
-    ];
+    const handleSearch = async (e?: React.FormEvent) => {
+        if (e) e.preventDefault();
+        if (!profile?.schoolId || !query.trim()) return;
+
+        setLoading(true);
+        try {
+            const q = query.trim();
+            // In a real production app with many students, we'd use a server-side search or Algolia.
+            // For now, we fetch all students for this school and filter locally for responsiveness,
+            // or perform multiple exact matches if the query is a roll number/mobile.
+            const studentSnap = await getDocs(collection(db, 'students'), where('schoolId', '==', profile.schoolId));
+            const allStudents = studentSnap.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+            
+            const filtered = allStudents.filter(r =>
+                r.name.toLowerCase().includes(q.toLowerCase()) ||
+                r.roll?.toString().includes(q) ||
+                r.mobile?.includes(q)
+            );
+
+            setResults(filtered);
+        } catch (error) {
+            console.error("Search index error:", error);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const filteredResults = results.filter(r =>
-        (activeTab === 'Current' ? r.status === 'Current' : r.status !== 'Current') &&
-        (r.name.toLowerCase().includes(query.toLowerCase()) ||
-            r.roll.includes(query) ||
-            r.mobile.includes(query))
+        activeTab === 'Current' ? r.status !== 'Graduated' && r.status !== 'Withdrawn' : r.status === activeTab
     );
 
     return (
@@ -51,17 +72,17 @@ export default function SearchPage() {
                         <h1 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">Global Archive Search</h1>
                         <p className="text-slate-500 font-medium">Query current and historical records across the institution</p>
                     </div>
-                    <div className="flex-1 max-w-2xl relative">
-                        <div className="absolute left-6 top-1/2 -translate-y-1/2 p-2 bg-blue-600 rounded-xl text-white shadow-lg shadow-blue-500/20">
+                        <form onSubmit={handleSearch} className="flex-1 max-w-2xl relative">
+                        <div className="absolute left-6 top-1/2 -translate-y-1/2 p-2 bg-blue-600 rounded-xl text-white shadow-lg shadow-blue-500/20 shadow-md">
                             <SearchIcon className="w-5 h-5" />
                         </div>
                         <Input
-                            placeholder="Search by name, roll number, or parent's mobile..."
+                            placeholder="Search by name, roll number..."
                             className="h-16 pl-20 pr-6 rounded-[2rem] border-2 border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl shadow-slate-200/50 dark:shadow-none focus:border-blue-500 transition-all font-bold text-lg"
                             value={query}
                             onChange={(e) => setQuery(e.target.value)}
                         />
-                    </div>
+                    </form>
                 </div>
 
                 {/* Tab Controls */}

@@ -130,38 +130,41 @@ export default function LoginPage() {
 
             const schoolId = schoolSnap.docs[0].id;
 
-            // STEP 2: Authenticate
+            // STEP 2: Authenticate Professional Credentials
             const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
             const user = userCredential.user;
 
-            // STEP 3: Sync Profile
+            // STEP 3 & 4: Profile Sync and Self-Healing
             const profileRef = doc(db, 'users', user.uid);
             const profileSnap = await getDoc(profileRef);
 
-            let profile;
+            let finalProfile;
             if (!profileSnap.exists()) {
-                profile = {
+                // AUTO-CREATE PROFILE (Self-Healing)
+                finalProfile = {
                     uid: user.uid,
                     email: user.email,
                     name: user.displayName || email.split('@')[0],
-                    role: 'teacher', 
+                    role: 'principal', // Default to principal for institution owners
                     schoolId: schoolId,
                     status: 'active',
                     createdAt: serverTimestamp(),
                 };
-                await setDoc(profileRef, profile);
+                await setDoc(profileRef, finalProfile);
             } else {
-                profile = profileSnap.data();
-                if (profile.schoolId !== schoolId) {
+                finalProfile = profileSnap.data();
+                // Isolation Guard: Match Institutional Binding
+                if (finalProfile.schoolId !== schoolId) {
                     await signOut(auth);
                     throw { code: 'custom/isolation-breach' };
                 }
             }
 
+            // Success Handshake
             localStorage.setItem('login_attempts', '0');
             setAttempts(0);
-            setSuccessMessage('Login successful. Redirecting...');
-            router.push(profile.role === 'principal' ? '/dashboard/principal' : '/dashboard/teacher');
+            setSuccessMessage('Professional identity verified. Redirecting...');
+            router.push(finalProfile.role === 'principal' ? '/dashboard/principal' : '/dashboard/teacher');
 
         } catch (err: any) {
             console.error("Login error:", err);

@@ -26,6 +26,7 @@ import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 
 export default function StudentProfilePage() {
+    const { profile } = useAuth();
     const params = useParams();
     const router = useRouter();
     const componentRef = useRef<HTMLDivElement>(null);
@@ -39,22 +40,30 @@ export default function StudentProfilePage() {
 
     useEffect(() => {
         const fetchStudent = async () => {
-            if (!params.id) return;
+            if (!params.id || !profile?.schoolId) return;
             try {
                 const docRef = doc(db, 'students', params.id as string);
                 const docSnap = await getDoc(docRef);
+                
                 if (docSnap.exists()) {
-                    setStudent({ id: docSnap.id, ...docSnap.data() });
+                    const data = docSnap.data();
+                    // Multi-Tenant Security Buffer
+                    if (data.schoolId !== profile.schoolId) {
+                        console.error("Permission Denied: Cross-tenant access blocked.");
+                        setStudent(null);
+                    } else {
+                        setStudent({ id: docSnap.id, ...data });
+                    }
                 }
             } catch (error) {
-                console.error("Error fetching student:", error);
+                console.error("Error fetching student dossier:", error);
             } finally {
                 setLoading(false);
             }
         };
 
         fetchStudent();
-    }, [params.id]);
+    }, [params.id, profile?.schoolId]);
 
     if (loading) {
         return (
