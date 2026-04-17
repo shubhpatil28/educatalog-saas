@@ -47,38 +47,45 @@ export default function GeneralRegistrationPage() {
 
     const handleRegister = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (loading) return;
+
         setError(null);
 
-        if (formData.password.length < 6) return setError('Password must be at least 6 characters.');
-        if (formData.password !== formData.confirmPassword) return setError('Passwords do not match.');
-        if (!formData.institutionalCode.trim()) return setError('Institutional Code is required.');
+        // Basic Intelligence Validation
+        if (!formData.email.includes('@')) return setError('Invalid identity profile (email).');
+        if (formData.password.length < 6) return setError('Security protocol requires min 6 character password.');
+        if (formData.password !== formData.confirmPassword) return setError('Identity verification mismatch.');
+        if (!formData.institutionalCode.trim()) return setError('Institutional registry ID is mandatory.');
 
         setLoading(true);
+
         try {
             // 1. Validate Institutional Code
             const schoolQuery = query(
                 collection(db, 'schools'),
-                where('code', '==', formData.institutionalCode.trim())
+                where('code', '==', formData.institutionalCode.trim().toUpperCase())
             );
             const schoolSnap = await getDocs(schoolQuery);
 
             if (schoolSnap.empty) {
-                throw new Error('Invalid Institutional Code. Please check with your administrator.');
+                throw new Error('Institutional Registry Check Failed. Invalid code.');
             }
 
+            const schoolId = schoolSnap.docs[0].id;
+
             // 2. Create Auth Account
-            const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+            const userCredential = await createUserWithEmailAndPassword(auth, formData.email.trim(), formData.password);
             const user = userCredential.user;
 
-            await updateProfile(user, { displayName: formData.name });
+            await updateProfile(user, { displayName: formData.name.trim() });
 
             // 3. Create Firestore Profile
             await setDoc(doc(db, 'users', user.uid), {
                 uid: user.uid,
                 email: formData.email.trim(),
                 name: formData.name.trim(),
-                role: 'teacher', // Default role for general registration
-                schoolId: formData.institutionalCode.trim(),
+                role: 'teacher', 
+                schoolId: schoolId,
                 status: 'active',
                 createdAt: serverTimestamp(),
             });
@@ -89,11 +96,17 @@ export default function GeneralRegistrationPage() {
             }, 2000);
 
         } catch (err: any) {
-            console.error(err);
-            let msg = 'Registration failed. Please try again.';
-            if (err.code === 'auth/email-already-in-use') msg = 'This email is already registered.';
-            else if (err.code === 'auth/invalid-email') msg = 'Invalid email address format.';
-            else if (err.message) msg = err.message;
+            console.error("Registration error:", err);
+            let msg = 'Onboarding failed. Please retry.';
+            
+            if (err.code === 'auth/email-already-in-use') {
+                msg = 'Account already exists. Please login.';
+            } else if (err.code === 'auth/invalid-email') {
+                msg = 'Invalid identity profile format.';
+            } else if (err.message) {
+                msg = err.message;
+            }
+            
             setError(msg);
         } finally {
             setLoading(false);

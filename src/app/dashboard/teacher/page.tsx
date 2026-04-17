@@ -22,10 +22,10 @@ import {
     collection,
     query,
     where,
-    onSnapshot,
     Timestamp,
     orderBy,
-    limit
+    limit,
+    getDocs
 } from 'firebase/firestore';
 
 export default function TeacherDashboard() {
@@ -37,42 +37,41 @@ export default function TeacherDashboard() {
         totalStudents: 0,
         markedToday: 0
     });
-    const [recentAttendance, setRecentAttendance] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         if (!profile?.schoolId) return;
 
-        // Fetch Total Students
-        const qStudents = query(
-            collection(db, 'students'),
-            where('schoolId', '==', profile.schoolId)
-        );
-        const unsubscribeStudents = onSnapshot(qStudents, (snapshot) => {
-            setStats(prev => ({ ...prev, totalStudents: snapshot.size }));
-        });
+        const fetchStats = async () => {
+            setLoading(true);
+            try {
+                // 1. Classroom Registry Shard
+                const studentSnap = await getDocs(query(
+                    collection(db, 'students'),
+                    where('schoolId', '==', profile.schoolId)
+                ));
 
-        // Fetch Today's Marked count
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const qAttendance = query(
-            collection(db, 'attendance'),
-            where('schoolId', '==', profile.schoolId),
-            where('date', '>=', Timestamp.fromDate(today))
-        );
-        const unsubscribeAttendance = onSnapshot(qAttendance, (snapshot) => {
-            setStats(prev => ({ ...prev, markedToday: snapshot.size }));
-        });
+                // 2. Today's Attendance Node
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const attendanceSnap = await getDocs(query(
+                    collection(db, 'attendance'),
+                    where('schoolId', '==', profile.schoolId),
+                    where('date', '>=', Timestamp.fromDate(today))
+                ));
 
-        // Fetch Recent Attendance summary for the last few days
-        // This is complex in Firestore due to how records are structured.
-        // For now, let's keep the UI dynamic but simplify the logic.
-
-        setLoading(false);
-        return () => {
-            unsubscribeStudents();
-            unsubscribeAttendance();
+                setStats({
+                    totalStudents: studentSnap.size,
+                    markedToday: attendanceSnap.size
+                });
+            } catch (err) {
+                console.error("Teacher Portal Sync Error:", err);
+            } finally {
+                setLoading(false);
+            }
         };
+
+        fetchStats();
     }, [profile?.schoolId]);
 
     const dashboardStats = [

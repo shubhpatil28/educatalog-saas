@@ -40,25 +40,31 @@ export default function FacultyManagement() {
     const [saveLoading, setSaveLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    useEffect(() => {
+    const fetchTeachers = async () => {
         if (!profile?.schoolId) return;
+        setLoading(true);
 
-        const q = query(
-            collection(db, 'users'),
-            where('schoolId', '==', profile.schoolId),
-            where('role', '==', 'teacher')
-        );
-
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const faculty = snapshot.docs.map(doc => ({
+        try {
+            const q = query(
+                collection(db, 'users'),
+                where('schoolId', '==', profile.schoolId),
+                where('role', '==', 'teacher')
+            );
+            const snap = await getDocs(q);
+            const faculty = snap.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
             }));
             setTeachers(faculty);
+        } catch (err) {
+            console.error("Fetch error:", err);
+        } finally {
             setLoading(false);
-        });
+        }
+    };
 
-        return () => unsubscribe();
+    useEffect(() => {
+        fetchTeachers();
     }, [profile?.schoolId]);
 
     const handleAssign = async (teacher: any) => {
@@ -100,6 +106,7 @@ export default function FacultyManagement() {
             setEditingTeacherId(null);
             setEditClass('');
             setEditDiv('');
+            fetchTeachers();
         } catch (err: any) {
             console.error(err);
             setError("Failed to update teacher assignment.");

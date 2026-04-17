@@ -37,10 +37,10 @@ import {
     collection,
     query,
     where,
-    onSnapshot,
     Timestamp,
     orderBy,
-    limit
+    limit,
+    getDocs
 } from 'firebase/firestore';
 
 export default function PrincipalDashboard() {
@@ -61,44 +61,61 @@ export default function PrincipalDashboard() {
     useEffect(() => {
         if (!profile?.schoolId) return;
 
-        // Fetch Students count
-        const qStudents = query(collection(db, 'students'), where('schoolId', '==', profile.schoolId));
-        const unsubscribeStudents = onSnapshot(qStudents, (snapshot) => {
-            setStats(prev => ({ ...prev, totalStudents: snapshot.size }));
-        });
+        const fetchStats = async () => {
+            setLoading(true);
+            try {
+                // 1. Total Students Audit
+                const studentSnap = await getDocs(query(
+                    collection(db, 'students'), 
+                    where('schoolId', '==', profile.schoolId)
+                ));
 
-        // Fetch Teachers count
-        const qTeachers = query(
-            collection(db, 'users'),
-            where('schoolId', '==', profile.schoolId),
-            where('role', '==', 'teacher')
-        );
-        const unsubscribeTeachers = onSnapshot(qTeachers, (snapshot) => {
-            setStats(prev => ({ ...prev, totalTeachers: snapshot.size }));
-        });
+                // 2. Faculty Identity Check
+                const teacherSnap = await getDocs(query(
+                    collection(db, 'users'),
+                    where('schoolId', '==', profile.schoolId),
+                    where('role', '==', 'teacher')
+                ));
 
-        // Fetch Today's Attendance
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const qAttendance = query(
-            collection(db, 'attendance'),
-            where('schoolId', '==', profile.schoolId),
-            where('date', '>=', Timestamp.fromDate(today))
-        );
-        const unsubscribeAttendance = onSnapshot(qAttendance, (snapshot) => {
-            const presentCount = snapshot.docs.filter(doc => doc.data().status === 'present').length;
-            const totalRecorded = snapshot.size;
-            const percentage = totalRecorded > 0 ? (presentCount / totalRecorded) * 100 : 0;
-            setStats(prev => ({ ...prev, todayAttendance: percentage.toFixed(1) }));
-        });
+                // 3. Daily Attendance Compliance
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const attendanceSnap = await getDocs(query(
+                    collection(db, 'attendance'),
+                    where('schoolId', '==', profile.schoolId),
+                    where('date', '>=', Timestamp.fromDate(today))
+                ));
 
-        setLoading(false);
-        return () => {
-            unsubscribeStudents();
-            unsubscribeTeachers();
-            unsubscribeAttendance();
+                const presentCount = attendanceSnap.docs.filter(doc => doc.data().status === 'present').length;
+                const totalRecorded = attendanceSnap.size;
+                const percentage = totalRecorded > 0 ? (presentCount / totalRecorded) * 100 : 0;
+
+                setStats({
+                    totalStudents: studentSnap.size,
+                    totalTeachers: teacherSnap.size,
+                    activeClasses: 12,
+                    todayAttendance: percentage.toFixed(1)
+                });
+            } catch (err) {
+                console.error("Dashboard Intelligence Sync Error:", err);
+            } finally {
+                setLoading(false);
+            }
         };
+
+        fetchStats();
     }, [profile?.schoolId]);
+
+    if (loading) {
+        return (
+            <DashboardLayout allowedRoles={['principal']}>
+                <div className="h-[60vh] flex flex-col items-center justify-center gap-4">
+                    <Loader2 className="w-12 h-12 text-blue-600 animate-spin" />
+                    <p className="font-black text-slate-400 uppercase tracking-widest text-xs">Loading Institutional Intelligence...</p>
+                </div>
+            </DashboardLayout>
+        );
+    }
 
     const dashboardStats = [
         { title: 'Total Students', value: stats.totalStudents.toLocaleString(), icon: Users, color: 'text-blue-600', bg: 'bg-blue-100', change: '+2.5%', subtext: 'Growth rate' },

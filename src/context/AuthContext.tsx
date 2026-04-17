@@ -28,79 +28,67 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [school, setSchool] = useState<SchoolInfo | null>(null);
     const [loading, setLoading] = useState(true);
 
-    // Ref to hold the active profile unsubscribe so we can clean it up on sign-out
     const profileUnsubRef = useRef<(() => void) | null>(null);
 
     useEffect(() => {
         const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
-            // Clean up any existing profile listener before switching users
+            setUser(firebaseUser);
+
+            // 1. Cleanup existing listener on state change
             if (profileUnsubRef.current) {
                 profileUnsubRef.current();
                 profileUnsubRef.current = null;
             }
 
-            setUser(firebaseUser);
-
             if (firebaseUser) {
                 const userRef = doc(db, 'users', firebaseUser.uid);
+                let currentSchoolId: string | null = null;
 
-                // Use onSnapshot so the profile updates in real-time.
-                // This is critical: after registration, the page writes the user
-                // doc a moment after auth — onSnapshot picks that up automatically.
-                const unsubProfile = onSnapshot(
-                    userRef,
-                    async (snap) => {
-                        if (snap.exists()) {
-                            const data = snap.data() as UserProfile;
-                            setProfile(data);
+                // 2. Start single profile listener
+                profileUnsubRef.current = onSnapshot(userRef, async (snap) => {
+                    if (snap.exists()) {
+                        const data = snap.data() as UserProfile;
+                        setProfile(data);
 
-                            // Fire-and-forget last-login update (won't block rendering)
-                            updateDoc(userRef, { lastLogin: serverTimestamp() }).catch(() => {});
+                        // Optional: Mark session activity
+                        updateDoc(userRef, { lastLogin: serverTimestamp() }).catch(() => {});
 
-                            // Fetch matching school document
-                            if (data.schoolId && data.schoolId !== 'TEMP') {
-                                try {
-                                    const schoolSnap = await getDoc(doc(db, 'schools', data.schoolId));
-                                    if (schoolSnap.exists()) {
-                                        setSchool(schoolSnap.data() as SchoolInfo);
-                                    } else {
-                                        setSchool(null);
-                                    }
-                                } catch (e) {
-                                    console.warn('Failed to fetch school data:', e);
-                                    setSchool(null);
+                        // 3. Fetch school data if schoolId changes
+                        if (data.schoolId && data.schoolId !== currentSchoolId) {
+                            currentSchoolId = data.schoolId;
+                            try {
+                                const schoolSnap = await getDoc(doc(db, 'schools', data.schoolId));
+                                if (schoolSnap.exists()) {
+                                    setSchool(schoolSnap.data() as SchoolInfo);
                                 }
-                            } else {
-                                setSchool(null);
+                            } catch (e) {
+                                console.error('[Auth] School sync error:', e);
                             }
-                        } else {
-                            // Profile not found — login/register page will create it.
-                            // Do NOT auto-create with a TEMP schoolId as that
-                            // breaks multi-tenant isolation.
-                            setProfile(null);
-                            setSchool(null);
                         }
-                        setLoading(false);
-                    },
-                    (err) => {
-                        console.error('Profile listener error:', err);
+                    } else {
+                        // User exists in Auth but not in Firestore
                         setProfile(null);
-                        setLoading(false);
+                        setSchool(null);
                     }
-                );
-
-                profileUnsubRef.current = unsubProfile;
+                    setLoading(false);
+                }, (err) => {
+                    console.error('[Auth] Profile sync error:', err);
+                    setLoading(false);
+                });
             } else {
-                // Signed out
+                // User signed out
                 setProfile(null);
                 setSchool(null);
                 setLoading(false);
             }
         });
 
+        // 4. Final Cleanup
         return () => {
             unsubscribeAuth();
-            if (profileUnsubRef.current) profileUnsubRef.current();
+            if (profileUnsubRef.current) {
+                profileUnsubRef.current();
+            }
         };
     }, []);
 

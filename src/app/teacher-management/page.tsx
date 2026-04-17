@@ -25,7 +25,7 @@ import {
     collection,
     query,
     where,
-    onSnapshot,
+    getDocs,
     doc,
     setDoc,
     deleteDoc,
@@ -69,26 +69,32 @@ export default function TeacherManagementPage() {
     });
     const [isEditing, setIsEditing] = useState(false);
 
-    useEffect(() => {
+    const fetchTeachers = async () => {
         if (!profile?.schoolId) return;
+        setLoading(true);
 
-        const q = query(
-            collection(db, 'users'),
-            where('schoolId', '==', profile.schoolId),
-            where('role', '==', 'teacher'),
-            orderBy('createdAt', 'desc')
-        );
-
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const teacherData = snapshot.docs.map(doc => ({
+        try {
+            const q = query(
+                collection(db, 'users'),
+                where('schoolId', '==', profile.schoolId),
+                where('role', '==', 'teacher'),
+                orderBy('createdAt', 'desc')
+            );
+            const snap = await getDocs(q);
+            const teacherData = snap.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
             }));
             setTeachers(teacherData);
+        } catch (err) {
+            console.error("Staff fetch error:", err);
+        } finally {
             setLoading(false);
-        });
+        }
+    };
 
-        return () => unsubscribe();
+    useEffect(() => {
+        fetchTeachers();
     }, [profile?.schoolId]);
 
     const handleAddTeacher = async (e: React.FormEvent) => {
@@ -129,6 +135,7 @@ export default function TeacherManagementPage() {
 
             setIsModalOpen(false);
             resetForm();
+            fetchTeachers();
             alert("Teacher account provisioned successfully.");
         } catch (error: any) {
             console.error("Error adding teacher:", error);
@@ -151,6 +158,7 @@ export default function TeacherManagementPage() {
             });
             setIsModalOpen(false);
             resetForm();
+            fetchTeachers();
             alert("Teacher information updated.");
         } catch (error) {
             console.error("Error updating teacher:", error);
@@ -165,6 +173,7 @@ export default function TeacherManagementPage() {
 
         try {
             await deleteDoc(doc(db, 'users', id));
+            fetchTeachers();
             alert("Teacher record purged.");
         } catch (error) {
             console.error("Error purging teacher:", error);
@@ -177,6 +186,7 @@ export default function TeacherManagementPage() {
             await updateDoc(doc(db, 'users', teacher.id), {
                 status: newStatus
             });
+            fetchTeachers();
         } catch (error) {
             console.error("Status toggle failed:", error);
         }

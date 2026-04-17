@@ -25,14 +25,14 @@ import {
     collection,
     query,
     where,
-    onSnapshot,
     getDocs,
+    addDoc,
     setDoc,
     doc,
     serverTimestamp,
+    Timestamp,
     orderBy,
     limit,
-    Timestamp,
     writeBatch
 } from 'firebase/firestore';
 
@@ -54,110 +54,108 @@ export default function AttendancePage() {
 
     // Sync selected class with teacher profile
     useEffect(() => {
-        if (profile?.role === 'teacher' && profile.class && profile.division) {
-            setSelectedClass(profile.class);
-            setSelectedDivision(profile.division);
+        if (profile?.role === 'teacher') {
+            setSelectedClass(profile.class || '10');
+            setSelectedDivision(profile.division || 'A');
         }
-    }, [profile]);
+    }, [profile?.schoolId, profile?.class, profile?.division]);
 
-    // Fetch students based on role and selected class/div
-    useEffect(() => {
+    const fetchStudents = async () => {
         if (!profile?.schoolId) return;
         setLoading(true);
 
-        let q;
-        if (profile.role === 'teacher') {
-            // Teachers only see their assigned class
-            q = query(
-                collection(db, 'students'),
-                where('schoolId', '==', profile.schoolId),
-                where('class', '==', profile.class || '10'),
-                where('division', '==', profile.division || 'A')
-            );
-        } else {
-            // Principals can view selected class
-            q = query(
-                collection(db, 'students'),
-                where('schoolId', '==', profile.schoolId),
-                where('class', '==', selectedClass),
-                where('division', '==', selectedDivision)
-            );
-        }
+        try {
+            const targetClass = profile.role === 'teacher' ? (profile.class || '10') : selectedClass;
+            const targetDiv = profile.role === 'teacher' ? (profile.division || 'A') : selectedDivision;
 
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const studentData = snapshot.docs.map(doc => ({
+            const snap = await getDocs(query(
+                collection(db, 'students'),
+                where('schoolId', '==', profile.schoolId),
+                where('class', '==', targetClass),
+                where('division', '==', targetDiv)
+            ));
+            
+            const studentData = snap.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
-            })).sort((a: any, b: any) => (parseInt(a.rollNumber) || 0) - (parseInt(b.rollNumber) || 0));
+            })).sort((a: any, b: any) => (parseInt(a.roll) || 0) - (parseInt(b.roll) || 0));
 
             setStudents(studentData);
+        } catch (err) {
+            console.error("Attendance registry fetch error:", err);
+        } finally {
             setLoading(false);
-        });
+        }
+    };
 
-        return () => unsubscribe();
-    }, [profile, selectedClass, selectedDivision]);
+    const fetchHistory = async () => {
+        if (!profile?.schoolId) return;
+        const targetClass = profile.role === 'teacher' ? profile.class : selectedClass;
+        const targetDiv = profile.role === 'teacher' ? profile.division : selectedDivision;
 
-    // Fetch attendance for selected date and class
-    useEffect(() => {
+        if (!targetClass || !targetDiv) return;
+
+        try {
+            const snapshot = await getDocs(query(
+                collection(db, 'attendance'),
+                where('schoolId', '==', profile.schoolId),
+                where('class', '==', targetClass),
+                where('division', '==', targetDiv),
+                orderBy('date', 'desc'),
+                limit(12)
+            ));
+
+            const historyData = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data(),
+                date: (doc.data().date as Timestamp)?.toDate()
+            }));
+            setHistory(historyData);
+        } catch (err) {
+            console.error("History fetch error:", err);
+        }
+    };
+
+    const fetchDailyStatus = async () => {
         if (!profile?.schoolId || !selectedDate) return;
 
-        const fetchAttendance = async () => {
-            const startOfDay = new Date(selectedDate);
-            startOfDay.setHours(0, 0, 0, 0);
-            const endOfDay = new Date(selectedDate);
-            endOfDay.setHours(23, 59, 59, 999);
+        const startOfDay = new Date(selectedDate);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(selectedDate);
+        endOfDay.setHours(23, 59, 59, 999);
 
-            const targetClass = profile.role === 'teacher' ? profile.class : selectedClass;
-            const targetDiv = profile.role === 'teacher' ? profile.division : selectedDivision;
+        const targetClass = profile.role === 'teacher' ? profile.class : selectedClass;
+        const targetDiv = profile.role === 'teacher' ? profile.division : selectedDivision;
 
-            const q = query(
+        if (!targetClass || !targetDiv) return;
+
+        try {
+            const snapshot = await getDocs(query(
                 collection(db, 'attendance'),
                 where('schoolId', '==', profile.schoolId),
                 where('class', '==', targetClass),
                 where('division', '==', targetDiv),
                 where('date', '>=', Timestamp.fromDate(startOfDay)),
                 where('date', '<=', Timestamp.fromDate(endOfDay))
-            );
+            ));
 
-            const snapshot = await getDocs(q);
             const records: Record<string, AttendanceStatus> = {};
             snapshot.docs.forEach(doc => {
                 const data = doc.data();
                 records[data.studentId] = data.status;
             });
             setAttendance(records);
-        };
+        } catch (err) {
+            console.error("Daily status fetch error:", err);
+        }
+    };
 
-        fetchAttendance();
-    }, [profile, selectedDate, selectedClass, selectedDivision]);
-
-    // Fetch history (last 10 records for this class)
     useEffect(() => {
         if (!profile?.schoolId) return;
-
-        const targetClass = profile.role === 'teacher' ? profile.class : selectedClass;
-        const targetDiv = profile.role === 'teacher' ? profile.division : selectedDivision;
-
-        const q = query(
-            collection(db, 'attendance'),
-            where('schoolId', '==', profile.schoolId),
-            where('class', '==', targetClass),
-            where('division', '==', targetDiv),
-            orderBy('date', 'desc'),
-            limit(12)
-        );
-
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const historyData = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data(),
-                date: doc.data().date?.toDate()
-            }));
-            setHistory(historyData);
-        });
-
-        return () => unsubscribe();
-    }, [profile, selectedClass, selectedDivision]);
+        fetchStudents();
+        fetchHistory();
+        fetchDailyStatus();
+    }, [profile?.schoolId, profile?.class, profile?.division, selectedClass, selectedDivision, selectedDate]);
 
     const handleStatusChange = (studentId: string, status: AttendanceStatus) => {
         setAttendance(prev => ({
@@ -198,6 +196,7 @@ export default function AttendancePage() {
             });
 
             await batch.commit();
+            fetchHistory();
             alert(`Attendance for Class ${targetClass}-${targetDiv} synced!`);
         } catch (error) {
             console.error("Error saving attendance:", error);

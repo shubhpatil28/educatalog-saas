@@ -28,11 +28,11 @@ import {
     updateDoc,
     deleteDoc,
     doc,
-    onSnapshot,
     query,
     where,
     serverTimestamp,
-    orderBy
+    orderBy,
+    getDocs
 } from 'firebase/firestore';
 
 export default function StudentCatalogPage() {
@@ -56,38 +56,49 @@ export default function StudentCatalogPage() {
         dob: ''
     });
 
-    // Fetch students from Firestore
-    useEffect(() => {
-        if (!profile?.schoolId) return;
-
-        let q;
-        if (profile.role === 'teacher' && profile.class && profile.division) {
-            q = query(
-                collection(db, 'students'),
-                where('schoolId', '==', profile.schoolId),
-                where('class', '==', profile.class),
-                where('division', '==', profile.division),
-                orderBy('createdAt', 'desc')
-            );
-        } else {
-            q = query(
-                collection(db, 'students'),
-                where('schoolId', '==', profile.schoolId),
-                orderBy('createdAt', 'desc')
-            );
+    const fetchStudents = async () => {
+        if (!profile?.schoolId) {
+            setLoading(false);
+            return;
         }
+        
+        setLoading(true);
 
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const studentData = snapshot.docs.map(doc => ({
+        try {
+            let q;
+            if (profile.role === 'teacher' && profile.class && profile.division) {
+                q = query(
+                    collection(db, 'students'),
+                    where('schoolId', '==', profile.schoolId),
+                    where('class', '==', profile.class),
+                    where('division', '==', profile.division),
+                    orderBy('createdAt', 'desc')
+                );
+            } else {
+                q = query(
+                    collection(db, 'students'),
+                    where('schoolId', '==', profile.schoolId),
+                    orderBy('createdAt', 'desc')
+                );
+            }
+
+            const snap = await getDocs(q);
+            const studentData = snap.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
             }));
-            setStudents(studentData);
-            setLoading(false);
-        });
 
-        return () => unsubscribe();
-    }, [profile?.schoolId]);
+            setStudents(studentData);
+        } catch (err) {
+            console.error("Student Registry fetch error:", err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchStudents();
+    }, [profile?.schoolId, profile?.role]);
 
     const handleOpenModal = (student: any = null) => {
         if (student) {
@@ -141,6 +152,7 @@ export default function StudentCatalogPage() {
                 });
             }
             setIsModalOpen(false);
+            fetchStudents();
         } catch (error) {
             console.error("Error saving student:", error);
             alert("Failed to save student record.");
@@ -159,6 +171,7 @@ export default function StudentCatalogPage() {
         try {
             await deleteDoc(doc(db, 'students', studentToDelete.id));
             setIsDeleteModalOpen(false);
+            fetchStudents();
         } catch (error) {
             console.error("Error deleting student:", error);
             alert("Failed to delete student record.");
