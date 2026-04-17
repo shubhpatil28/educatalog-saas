@@ -9,7 +9,7 @@ export interface SchoolSubscription {
 
 export interface SchoolInfo {
     schoolId: string;
-    schoolCode?: string; // Legacy field
+    code: string;               // Institutional login code (same as schoolId, e.g. SCH-XXXX)
     name: string;
     city?: string;
     principalName: string;
@@ -22,8 +22,6 @@ export interface SchoolInfo {
     paymentStatus?: 'pending' | 'paid';
     subscriptionStart?: any;
     subscriptionEnd?: any;
-    razorpayOrderId?: string;
-    razorpayPaymentId?: string;
     createdAt: any;
     expiryDate: any;
 }
@@ -33,12 +31,14 @@ export interface UserProfile {
     email: string;
     name: string;
     role: UserRole;
-    schoolId: string; // Multi-tenant ID
-    class?: string; // e.g. "10"
-    division?: string; // e.g. "A"
-    status: 'Active' | 'Disabled';
+    schoolId: string;           // Multi-tenant isolation key
+    class?: string | null;      // Teachers only, e.g. "10"
+    division?: string | null;   // Teachers only, e.g. "A"
+    status: 'active' | 'disabled';
     createdAt: any;
     lastLogin?: any;
+    failedAttempts?: number;    // Rate-limiting field
+    lockUntil?: any;            // Timestamp — Firestore-persisted lockout
 }
 
 export interface Student {
@@ -81,9 +81,10 @@ export interface AttendanceRecord {
     rollNumber: string;
     class: string;
     division: string;
-    date: any; // Timestamp or Date
+    date: any;
     status: 'present' | 'absent' | 'late';
-    recordedBy: string; // Teacher UID
+    recordedBy: string;
+    schoolId: string;
 }
 
 export interface ClassInfo {

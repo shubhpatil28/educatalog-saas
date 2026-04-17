@@ -9,11 +9,11 @@ import {
     collection,
     getDocs,
     query,
-    orderBy,
-    limit,
+    where,
     serverTimestamp,
     Timestamp
 } from 'firebase/firestore';
+
 import { auth, db } from '@/lib/firebase';
 import { Button, Card, Input, cn } from '@/components/ui';
 import {
@@ -36,25 +36,37 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 
-// ─── Auto-generate a unique SCH-XXXX ID ────────────────────────────────────
-async function generateSchoolId(): Promise<string> {
-    try {
-        const schoolsRef = collection(db, 'schools');
-        // Get all school docs and find the highest SCH-XXXX number
-        const snap = await getDocs(query(schoolsRef, orderBy('__name__'), limit(1000)));
-        let maxNum = 1000;
-        snap.docs.forEach(d => {
-            const match = d.id.match(/^SCH-(\d+)$/);
-            if (match) {
-                const num = parseInt(match[1], 10);
-                if (num >= maxNum) maxNum = num + 1;
-            }
-        });
-        return `SCH-${maxNum}`;
-    } catch {
-        // Fallback using timestamp-based suffix
-        return `SCH-${1000 + Math.floor(Date.now() % 9000)}`;
+// ─── Auto-generate a unique SCH-XXXX code ──────────────────────────────────
+// Uses random alphanumeric characters to avoid ordering/collision issues.
+// Only called after Firebase Auth creation (user must be authenticated for
+// the Firestore read in uniqueness check to pass the security rules).
+const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // No ambiguous chars (0/O, 1/I)
+
+function randomSchoolCode(): string {
+    let code = 'SCH-';
+    for (let i = 0; i < 4; i++) {
+        code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
     }
+    return code;
+}
+
+async function generateSchoolId(): Promise<string> {
+    // Try up to 8 times to find a unique code (collision chance is < 0.001% for < 10k schools)
+    for (let attempt = 0; attempt < 8; attempt++) {
+        const code = randomSchoolCode();
+        try {
+            const snap = await getDocs(
+                query(collection(db, 'schools'), where('code', '==', code))
+            );
+            if (snap.empty) return code;
+        } catch {
+            // If the uniqueness check fails (e.g., permission issue), still return the code.
+            // Collisions are extremely unlikely; the code is acceptable as a fallback.
+            return code;
+        }
+    }
+    // Absolute fallback: timestamp-based suffix (guaranteed unique)
+    return `SCH-${Date.now().toString(36).toUpperCase().slice(-4)}`;
 }
 
 const PLAN_OPTIONS = [

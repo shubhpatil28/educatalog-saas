@@ -88,8 +88,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     const { openCheckout } = useRazorpay();
 
     const handlePay = async () => {
-        alert("Payment feature is disabled for now");
-        setStatus('idle');
+        setStatus('error');
+        setMessage('Payments are temporarily disabled. Please contact the EduCatalog support team for manual activation.');
     };
 
     const handleClose = () => {
@@ -144,7 +144,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                                 </div>
                                 <div className="flex items-center gap-2 text-blue-100 text-xs">
                                     <Shield className="w-3.5 h-3.5" />
-                                    Secured by Razorpay • 256-bit SSL Encryption
+                                    Payment Portal Temporarily Unavailable
                                 </div>
                             </div>
 
@@ -225,12 +225,12 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                                             </div>
                                         </div>
 
-                                        {/* Error */}
+                                        {/* Error / Disabled Message */}
                                         {status === 'error' && (
                                             <motion.div
                                                 initial={{ opacity: 0, y: 8 }}
                                                 animate={{ opacity: 1, y: 0 }}
-                                                className="p-4 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/20 rounded-2xl text-red-600 text-sm font-bold flex items-center gap-3"
+                                                className="p-4 bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/20 rounded-2xl text-amber-600 text-sm font-bold flex items-center gap-3"
                                             >
                                                 <AlertCircle className="w-5 h-5 flex-shrink-0" />
                                                 {message}
@@ -241,23 +241,14 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                                         <button
                                             onClick={handlePay}
                                             disabled={status === 'loading'}
-                                            className="w-full h-14 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-black uppercase text-xs tracking-widest shadow-xl shadow-blue-500/25 transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-3 disabled:opacity-70 disabled:cursor-not-allowed"
+                                            className="w-full h-14 rounded-2xl bg-slate-200 dark:bg-slate-800 text-slate-400 font-black uppercase text-xs tracking-widest transition-all flex items-center justify-center gap-3"
                                         >
-                                            {status === 'loading' ? (
-                                                <>
-                                                    <Loader2 className="w-5 h-5 animate-spin" />
-                                                    Processing...
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <Zap className="w-5 h-5" />
-                                                    Pay {PLANS.find(p => p.id === selectedPlan)?.displayPrice} · Activate Now
-                                                </>
-                                            )}
+                                            <Zap className="w-5 h-5" />
+                                            Portal Activation Locked
                                         </button>
 
                                         <p className="text-center text-[10px] text-slate-400 font-medium uppercase tracking-widest">
-                                            Annual billing • Auto-renews after 12 months • Cancel anytime
+                                            Online payments are currently disabled.
                                         </p>
                                     </>
                                 )}

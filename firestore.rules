@@ -2,99 +2,118 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ─── OPTIMIZED HELPER FUNCTIONS ──────────────────────────────────────
+    // ─── CORE HELPER FUNCTIONS ────────────────────────────────────────────
     function isSignedIn() {
       return request.auth != null;
     }
 
+    // Safely check if the calling user has a Firestore profile
+    function userExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    // Get user data — only call this AFTER confirming userExists()
     function getUser() {
-      // Single source of truth for user metadata (Role, SchoolId, Class/Div)
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
+    // Null-safe role check: returns false if profile doesn't exist
     function hasRole(role) {
-      return getUser().role == role;
+      return isSignedIn() && userExists() && getUser().role == role;
     }
 
+    // Null-safe school isolation check: returns false if profile doesn't exist
     function isSameSchool(schoolId) {
-      return getUser().schoolId == schoolId;
+      return isSignedIn() && userExists() && getUser().schoolId == schoolId;
     }
 
-    // ─── SCHOOLS COLLECTION ─────────────────────────────────────────────
+    // ─── SCHOOLS COLLECTION ──────────────────────────────────────────────
     match /schools/{schoolId} {
-      // Principals and Teachers need to read their institution data
-      allow read: if isSignedIn() && (isSameSchool(schoolId) || hasRole('superadmin'));
-      
-      // Only Principal of that school or superadmin can modify settings
+      // Any authenticated user can read schools.
+      // Needed for:
+      //   (a) Login: institution code validation after sign-in
+      //   (b) Registration: unique code generation check
+      allow read: if isSignedIn();
+
+      // Only the principal of THIS school or superadmin can update it
       allow update: if isSignedIn() && (
-        (hasRole('principal') && isSameSchool(schoolId)) || 
+        (hasRole('principal') && isSameSchool(schoolId)) ||
         hasRole('superadmin')
       );
-      
-      // Allow creation during registration; role check not needed yet as doc doesn't exist
+
+      // Allow creation during registration (authenticated user, new doc)
       allow create: if isSignedIn();
     }
 
-    // ─── USERS COLLECTION ───────────────────────────────────────────────
+    // ─── USERS COLLECTION ────────────────────────────────────────────────
     match /users/{userId} {
-      // Profile access: Self-access or Principal/Superadmin oversight
+      // Read: self, principal of same school, or superadmin
       allow read: if isSignedIn() && (
-        request.auth.uid == userId || 
+        request.auth.uid == userId ||
         (hasRole('principal') && isSameSchool(resource.data.schoolId)) ||
         hasRole('superadmin')
       );
-      
+
+      // Create: only the user themselves (auto-create on register/login healing)
       allow create: if isSignedIn() && request.auth.uid == userId;
 
+      // Update: self (no role/schoolId escalation), principal of same school, or superadmin
       allow update: if isSignedIn() && (
-        // Self-edit: Prevent role or schoolId escalation
-        (request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'schoolId'])) ||
-        // Principal managing school staff (Teachers)
-        (hasRole('principal') && isSameSchool(resource.data.schoolId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'schoolId'])) ||
-        // Superadmin full control
+        (request.auth.uid == userId &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'schoolId'])) ||
+        (hasRole('principal') && isSameSchool(resource.data.schoolId) &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'schoolId'])) ||
         hasRole('superadmin')
       );
     }
 
-    // ─── STUDENTS COLLECTION ────────────────────────────────────────────
+    // ─── STUDENTS COLLECTION ─────────────────────────────────────────────
     match /students/{studentId} {
       function canReadStudent() {
         let u = getUser();
         return (
           (u.role == 'principal' && u.schoolId == resource.data.schoolId) ||
-          (u.role == 'teacher' && u.schoolId == resource.data.schoolId && u.class == resource.data.class && u.division == resource.data.division) ||
+          (u.role == 'teacher'
+            && u.schoolId == resource.data.schoolId
+            && u.get('class', '') == resource.data.class
+            && u.get('division', '') == resource.data.division) ||
           u.role == 'superadmin'
         );
       }
 
       function canWriteStudent() {
         let u = getUser();
-        // For 'create', check if incoming data matches user's jurisdiction
         let target = request.resource.data;
         return (
           (u.role == 'principal' && u.schoolId == target.schoolId) ||
-          (u.role == 'teacher' && u.schoolId == target.schoolId && u.class == target.class && u.division == target.division) ||
+          (u.role == 'teacher'
+            && u.schoolId == target.schoolId
+            && u.get('class', '') == target.class
+            && u.get('division', '') == target.division) ||
           u.role == 'superadmin'
         );
       }
 
-      allow read: if isSignedIn() && canReadStudent();
-      allow write: if isSignedIn() && canWriteStudent();
+      allow read: if isSignedIn() && userExists() && canReadStudent();
+      allow write: if isSignedIn() && userExists() && canWriteStudent();
     }
 
-    // ─── ATTENDANCE COLLECTION ──────────────────────────────────────────
+    // ─── ATTENDANCE COLLECTION ───────────────────────────────────────────
     match /attendance/{attendanceId} {
       function canAccessAttendance(data) {
         let u = getUser();
         return (
           (u.role == 'principal' && u.schoolId == data.schoolId) ||
-          (u.role == 'teacher' && u.schoolId == data.schoolId && u.class == data.class && u.division == data.division) ||
+          (u.role == 'teacher'
+            && u.schoolId == data.schoolId
+            && u.get('class', '') == data.class
+            && u.get('division', '') == data.division) ||
           u.role == 'superadmin'
         );
       }
 
-      allow read: if isSignedIn() && canAccessAttendance(resource.data);
-      allow write: if isSignedIn() && canAccessAttendance(request.resource.data);
+      allow read: if isSignedIn() && userExists() && canAccessAttendance(resource.data);
+      allow write: if isSignedIn() && userExists() && canAccessAttendance(request.resource.data);
     }
   }
 }

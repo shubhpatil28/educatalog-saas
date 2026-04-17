@@ -60,11 +60,22 @@ export default function StudentCatalogPage() {
     useEffect(() => {
         if (!profile?.schoolId) return;
 
-        const q = query(
-            collection(db, 'students'),
-            where('schoolId', '==', profile.schoolId),
-            orderBy('createdAt', 'desc')
-        );
+        let q;
+        if (profile.role === 'teacher' && profile.class && profile.division) {
+            q = query(
+                collection(db, 'students'),
+                where('schoolId', '==', profile.schoolId),
+                where('class', '==', profile.class),
+                where('division', '==', profile.division),
+                orderBy('createdAt', 'desc')
+            );
+        } else {
+            q = query(
+                collection(db, 'students'),
+                where('schoolId', '==', profile.schoolId),
+                orderBy('createdAt', 'desc')
+            );
+        }
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const studentData = snapshot.docs.map(doc => ({
@@ -94,8 +105,8 @@ export default function StudentCatalogPage() {
             setFormData({
                 name: '',
                 roll: '',
-                class: '10',
-                division: 'A',
+                class: profile?.role === 'teacher' ? (profile.class || '1') : '10',
+                division: profile?.role === 'teacher' ? (profile.division || 'A') : 'A',
                 motherName: '',
                 dob: ''
             });
@@ -344,9 +355,10 @@ export default function StudentCatalogPage() {
                                                 <div className="space-y-1.5">
                                                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">Class</label>
                                                     <select
-                                                        className="w-full h-14 px-3 bg-slate-50/50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-800 rounded-2xl outline-none focus:border-blue-500 transition-colors font-black text-sm"
+                                                        className="w-full h-14 px-3 bg-slate-50/50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-800 rounded-2xl outline-none focus:border-blue-500 transition-colors font-black text-sm disabled:opacity-70"
                                                         value={formData.class}
                                                         onChange={(e) => setFormData({ ...formData, class: e.target.value })}
+                                                        disabled={profile?.role === 'teacher'}
                                                         title="Select Class"
                                                     >
                                                         {[...Array(12)].map((_, i) => (
@@ -357,9 +369,10 @@ export default function StudentCatalogPage() {
                                                 <div className="space-y-1.5">
                                                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">Div</label>
                                                     <select
-                                                        className="w-full h-14 px-3 bg-slate-50/50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-800 rounded-2xl outline-none focus:border-blue-500 transition-colors font-black text-sm"
+                                                        className="w-full h-14 px-3 bg-slate-50/50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-800 rounded-2xl outline-none focus:border-blue-500 transition-colors font-black text-sm disabled:opacity-70"
                                                         value={formData.division}
                                                         onChange={(e) => setFormData({ ...formData, division: e.target.value })}
+                                                        disabled={profile?.role === 'teacher'}
                                                         title="Select Division"
                                                     >
                                                         {['A', 'B', 'C', 'D', 'E'].map(div => (
